@@ -11,6 +11,14 @@ data="${MVM_DATA_DIR:?main.sh: MVM_DATA_DIR is unset}"
 box="$data/box"
 mkdir -p "$data"
 step() { bash "$here/$1" "${@:2}"; }
+store="${MVM_STORE:-registry}"
+
+# spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Two tiers" (in
+#       packer-plugin-macosx) -- in the repo tier, action.yml's save step saves the one image this
+#       run newly wrote, named here as soon as it exists, so a failing run still keeps it
+pushed() {  # $1 = the key just pushed
+  if [ "$store" = file ]; then echo "cache-save-key=$1" >> "${GITHUB_OUTPUT:-/dev/null}"; fi
+}
 
 # spec: tests/safety.bats -- GitHub masks a value that came from a secret, but not one that came
 #       from anywhere else; masking it here covers both
@@ -49,7 +57,11 @@ get_base() {  # $1 = "checked" when room for a hit was already checked; leaves t
     0) ;;
     3) step space.sh miss || exit 1
        step build.sh "$box" || exit 1
-       step image.sh push "$key" "$box" || exit 1 ;;
+       # spec: tests/main.bats -- a repo's 10 GB cache cannot hold a base and a prepared guest
+       #       both, so with cache-after-prepare the repo tier keeps only the prepared one
+       if [ "$store" = file ] && [ -n "$pkey" ]; then return; fi
+       step image.sh push "$key" "$box" || exit 1
+       pushed "$key" ;;
     *) exit 1 ;;
   esac
 }
@@ -87,6 +99,7 @@ if [ -n "${MVM_PREPARE:-}" ] && [ "$prepared_hit" = false ]; then
     #       cache-after-prepare is a second encrypted image under the prepared key
     step snapshot.sh "$box" "$data/prepared" || exit 1
     step image.sh push "$pkey" "$data/prepared" || exit 1
+    pushed "$pkey"
     step boot.sh "$data/prepared" || exit 1
     step sync.sh in || exit 1
   fi

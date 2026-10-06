@@ -77,3 +77,40 @@ image() { bash "$REPO/scripts/image.sh" "$@"; }
     run image pull notakey "$BOX"
     [ "$status" -eq 2 ]
 }
+
+@test "file store: push encrypts to the blob, pull decrypts it, and the registry is never touched" {
+    export MVM_STORE=file MVM_BLOB_DIR="$BATS_TEST_TMPDIR/blob"
+    run image push "$K" "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    head -1 "$MVM_BLOB_DIR/$K.tar.zst.age" | grep -q '^STUBAGE recipient='
+    out="$BATS_TEST_TMPDIR/out"
+    run image pull "$K" "$out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    diff -r "$BOX" "$out"
+    run grep -q '^oras' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
+@test "file store: no blob is a miss" {
+    export MVM_STORE=file MVM_BLOB_DIR="$BATS_TEST_TMPDIR/blob"
+    run image pull "$K" "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 3 ]
+    run grep -q '^oras' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
+@test "file store: a blob another key encrypted is a miss, and is removed so a push replaces it" {
+    export MVM_STORE=file MVM_BLOB_DIR="$BATS_TEST_TMPDIR/blob"
+    run image push "$K" "$BOX"
+    export MVM_IMAGE_KEY='AGE-SECRET-KEY-1SOMEONEELSE'
+    run image pull "$K" "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 3 ] || { echo "$output"; false; }
+    [[ "$output" == *"another key"* ]] || false
+    [ -z "$(ls -A "$BATS_TEST_TMPDIR/out" 2>/dev/null)" ]
+    [ ! -e "$MVM_BLOB_DIR/$K.tar.zst.age" ]
+    run image push "$K" "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run image pull "$K" "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    diff -r "$BOX" "$BATS_TEST_TMPDIR/out"
+}

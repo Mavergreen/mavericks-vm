@@ -33,6 +33,7 @@ jobs:
           # spec: tests/inputs.bats -- Nehalem names no vendor, so the Action adds GenuineIntel's
           - { sync: scp, cpu-model: Nehalem, brand: Nehalem }
           - { sync: tar, cpu-model: 'Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2', brand: Penryn }
+          - { sync: rsync, cpu-model: 'Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2', brand: Penryn, cache-store: repo }
     steps:
       - uses: actions/checkout@v7
       - name: Record the runner
@@ -44,6 +45,7 @@ jobs:
           image-key: ${{ secrets.MAVERICKS_VM_KEY }}
           sync: ${{ matrix.sync }}
           cpu-model: ${{ matrix.cpu-model }}
+          cache-store: ${{ matrix.cache-store || 'auto' }}
           debug-on-error: true
           envs: 'ROUNDTRIP'
           run: |

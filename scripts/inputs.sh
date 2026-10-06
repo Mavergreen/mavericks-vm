@@ -11,7 +11,7 @@ die() { echo "::error title=mavericks-vm::$*"; exit 1; }
 # spec: tests/inputs.bats -- an empty image-key is a fork's pull request (or a repo without the
 #       org secret), and must fail before anything is downloaded, built or pushed
 [ "${MVM_IN_HAS_IMAGE_KEY:-false}" = true ] \
-  || die "image-key is empty. It decrypts the cached guest and is the org secret MAVERICKS_VM_KEY; a pull request from a fork never receives secrets, so a fork cannot run Mavericks tests here"
+  || die "image-key is empty. It encrypts and decrypts the cached guest, from a secret (MAVERICKS_VM_KEY: make one with age-keygen); a pull request from a fork never receives secrets, so a fork cannot run Mavericks tests here"
 
 case "${MVM_IN_OSNAME:-mavericks}" in mavericks) ;; *) die "osname: only mavericks is supported (got '${MVM_IN_OSNAME}')" ;; esac
 case "${MVM_IN_RELEASE:-10.9}" in 10.9) ;; *) die "release: only 10.9 is supported (got '${MVM_IN_RELEASE}')" ;; esac
@@ -77,6 +77,16 @@ while IFS= read -r line; do
   fi
 done <<< "${MVM_IN_NAT:-}"
 
+# spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Two tiers" (in
+#       packer-plugin-macosx) -- Mavergreen's repos share the private registry; any other repo keeps
+#       its own encrypted guest in its own actions/cache
+case "${MVM_IN_CACHE_STORE:-auto}" in
+  auto) if [ "${GITHUB_REPOSITORY_OWNER:-}" = Mavergreen ]; then store="registry"; else store="file"; fi ;;
+  shared) store="registry" ;;
+  repo) store="file" ;;
+  *) die "cache-store: want auto, shared or repo (got '${MVM_IN_CACHE_STORE}')" ;;
+esac
+
 data_dir="${MVM_IN_DATA_DIR:-/mnt/mavericks-vm}"
 cache_dir="${MVM_IN_CACHE_DIR:-$data_dir/cache}"
 case "$data_dir$cache_dir" in *[[:space:]]*) die "data-dir and cache-dir may not contain whitespace" ;; esac
@@ -99,4 +109,6 @@ case "$data_dir$cache_dir" in *[[:space:]]*) die "data-dir and cache-dir may not
   echo "MVM_DEBUG=$debug"
   echo "MVM_SYNC_TIME=$sync_time"
   echo "MVM_DEBUG_ON_ERROR=$debug_on_error"
+  echo "MVM_STORE=$store"
+  echo "MVM_BLOB_DIR=$data_dir/blob"
 } >> "$GITHUB_ENV"

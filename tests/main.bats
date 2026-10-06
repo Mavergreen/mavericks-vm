@@ -87,3 +87,30 @@ order() { grep -oE '^[a-z-]+\.sh( (pull|push|in|out|hit|miss|--install|--prepare
     MVM_PREPARE= run main
     [ "$(grep -c '^run.sh' "$CALLS")" = 1 ]
 }
+
+@test "repo store, miss: the step names the key it newly cached, for the save step" {
+    MVM_STORE=file STUB_PULL=3 run main
+    [ "$status" -eq 0 ]
+    grep -qxF 'cache-save-key=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk' "$GITHUB_OUTPUT"
+}
+
+@test "repo store, hit: nothing new to save" {
+    MVM_STORE=file run main
+    [ "$status" -eq 0 ]
+    run grep -q '^cache-save-key=.' "$GITHUB_OUTPUT"
+    [ "$status" -ne 0 ]
+}
+
+@test "repo store, cache-after-prepare miss: only the prepared guest is cached, under its key" {
+    MVM_STORE=file MVM_CACHE_AFTER_PREPARE=true STUB_PULL=3 run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(grep -c '^image.sh push' "$CALLS")" = 1 ]
+    grep -q '^image.sh push pppp' "$CALLS"
+    grep -qxF 'cache-save-key=pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp' "$GITHUB_OUTPUT"
+}
+
+@test "a failing run still reports what it cached, so it is saved anyway" {
+    MVM_STORE=file STUB_PULL=3 MVM_RUN='fail' run main
+    [ "$status" -eq 7 ]
+    grep -q '^cache-save-key=kkkk' "$GITHUB_OUTPUT"
+}

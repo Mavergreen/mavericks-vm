@@ -99,3 +99,27 @@ PY
     [ "$status" -ne 0 ]
     [[ "$output" == *"sha256"* ]] || false
 }
+
+@test "action.yml: the repo cache is restored after the input check and before the run, and saved after it" {
+    run python3 - "$REPO/action.yml" <<'PY'
+import sys, yaml
+steps = yaml.safe_load(open(sys.argv[1]))["runs"]["steps"]
+names = [s.get("name") for s in steps]
+uses = [s.get("uses", "") for s in steps]
+r = next(i for i, u in enumerate(uses) if u.startswith("actions/cache/restore@"))
+w = next(i for i, u in enumerate(uses) if u.startswith("actions/cache/save@"))
+check = names.index("Check the inputs"); main = names.index("Run in Mavericks")
+ok = check < r < main < w
+save_if = steps[w].get("if", "")
+ok = ok and "always()" in save_if and "cache-save-key" in save_if
+ok = ok and "env.MVM_STORE == 'file'" in steps[r].get("if", "")
+# spec: tests/image.bats -- a guest that will not decrypt (the key changed) is rebuilt and saved
+#       under a newer name; restore takes the newest by prefix, never an exact name
+rw, ww = steps[r].get("with", {}), steps[w].get("with", {})
+ok = ok and rw.get("restore-keys", "").strip() == "mavericks-vm-${{ steps.key.outputs.key }}-"
+ok = ok and ww.get("key", "").startswith("mavericks-vm-${{ steps.main.outputs.cache-save-key }}-${{ github.run_id }}")
+print(names, steps[w].get("if"))
+sys.exit(0 if ok else 1)
+PY
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+}

@@ -16,7 +16,8 @@ setup() {
         MVM_IN_SYNC=rsync MVM_IN_COPYBACK=true MVM_IN_USESH= MVM_IN_ENVS= MVM_IN_NAT= \
         MVM_IN_HAS_IMAGE_KEY=true MVM_IN_DISABLE_CACHE=false MVM_IN_CACHE_AFTER_PREPARE=false \
         MVM_IN_CACHE_AFTER_PREPARE_KEY_SUFFIX= MVM_IN_CUSTOM_SHELL_NAME=mavericks \
-        MVM_IN_DATA_DIR= MVM_IN_CACHE_DIR= MVM_IN_DEBUG= MVM_IN_SYNC_TIME= MVM_IN_DEBUG_ON_ERROR=
+        MVM_IN_DATA_DIR= MVM_IN_CACHE_DIR= MVM_IN_DEBUG= MVM_IN_SYNC_TIME= MVM_IN_DEBUG_ON_ERROR= \
+        MVM_IN_CACHE_STORE=auto GITHUB_REPOSITORY_OWNER=Mavergreen
 }
 
 inputs() { bash "$REPO/scripts/inputs.sh"; }
@@ -32,7 +33,7 @@ want = {
     "disable-cache": "false", "cache-after-prepare": "false",
     "cache-after-prepare-key-suffix": "", "debug-on-error": "", "vnc-password": "",
     "custom-shell-name": "mavericks", "token": "${{ github.token }}",
-    "image-key": None, "cpu-model": "Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2",
+    "image-key": None, "cpu-model": "Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2", "cache-store": "auto",
 }
 got = yaml.safe_load(open(sys.argv[1]))["inputs"]
 bad = [f"{k}: want default {v!r}, got {got.get(k, {}).get('default')!r}" if k in got else f"{k}: missing"
@@ -154,4 +155,29 @@ EOF
     run inputs
     env_has MVM_DATA_DIR=/mnt/mavericks-vm
     env_has MVM_CACHE_DIR=/mnt/mavericks-vm/cache
+}
+
+@test "cache-store auto shares the registry for Mavergreen's repos, and keeps a repo's own cache for anyone else's" {
+    run inputs
+    env_has MVM_STORE=registry
+    : > "$GITHUB_ENV"
+    GITHUB_REPOSITORY_OWNER=someone-else run inputs
+    [ "$status" -eq 0 ]
+    env_has MVM_STORE=file
+}
+
+@test "cache-store shared and repo force the tier; anything else is refused" {
+    GITHUB_REPOSITORY_OWNER=someone-else MVM_IN_CACHE_STORE=shared run inputs
+    env_has MVM_STORE=registry
+    : > "$GITHUB_ENV"
+    MVM_IN_CACHE_STORE=repo run inputs
+    env_has MVM_STORE=file
+    MVM_IN_CACHE_STORE=s3 run inputs
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"auto, shared or repo"* ]] || false
+}
+
+@test "the repo cache's encrypted image lives in data-dir" {
+    MVM_IN_CACHE_STORE=repo run inputs
+    env_has MVM_BLOB_DIR=/mnt/mavericks-vm/blob
 }

@@ -67,10 +67,13 @@ inputs:
     description: The GitHub token that pulls and pushes the cached guest (needs packages read/write)
     default: ${{ github.token }}
   image-key:
-    description: The org secret MAVERICKS_VM_KEY, which decrypts and encrypts the cached guest
+    description: An age identity (age-keygen) in a secret, which encrypts and decrypts the cached guest -- a repo's own, or Mavergreen's org secret MAVERICKS_VM_KEY
   cpu-model:
     description: The guest CPU model, as QEMU's -cpu; one that names no vendor gets vendor=GenuineIntel, which 10.9 needs on an AMD runner
     default: Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2
+  cache-store:
+    description: Where the encrypted guest is cached -- auto (shared for Mavergreen repos, else repo), shared (Mavergreen's private registry) or repo (this repo's own actions/cache)
+    default: auto
 
 outputs:
   cache-after-prepare-hit:
@@ -104,7 +107,32 @@ runs:
         MVM_IN_DEBUG: ${{ inputs.debug }}
         MVM_IN_SYNC_TIME: ${{ inputs.sync-time }}
         MVM_IN_DEBUG_ON_ERROR: ${{ inputs.debug-on-error }}
+        MVM_IN_CACHE_STORE: ${{ inputs.cache-store }}
       run: bash "$GITHUB_ACTION_PATH/scripts/inputs.sh"
+
+    - name: Make the data and cache directories
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/dirs.sh"
+
+    # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Two tiers" (in
+    #       packer-plugin-macosx) -- the repo tier keeps the encrypted guest in this repo's own
+    #       actions/cache, restored after the input check so a fork without a key never downloads it
+    - name: The cache key
+      id: key
+      shell: bash
+      env:
+        MVM_PREPARE: ${{ inputs.prepare }}
+      run: |
+        if [ "$MVM_CACHE_AFTER_PREPARE" = true ]; then k="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --prepared)"; else k="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh")"; fi
+        { echo "key=$k"; echo "blob=$MVM_BLOB_DIR/$k.tar.zst.age"; } >> "$GITHUB_OUTPUT"
+
+    - name: Restore this repo's cached guest
+      if: env.MVM_STORE == 'file' && env.MVM_DISABLE_CACHE != 'true'
+      uses: actions/cache/restore@v6.1.0
+      with:
+        path: ${{ steps.key.outputs.blob }}
+        key: mavericks-vm-${{ steps.key.outputs.key }}
+        restore-keys: mavericks-vm-${{ steps.key.outputs.key }}-
 
     - name: Install QEMU, age, oras and packer
       shell: bash
@@ -121,3 +149,13 @@ runs:
         MVM_IMAGE_KEY: ${{ inputs.image-key }}
         MVM_TOKEN: ${{ inputs.token }}
       run: bash "$GITHUB_ACTION_PATH/scripts/main.sh"
+
+    # spec: tests/image.bats -- a cache entry's name can never be reused, so each save gets a new
+    #       one; when a guest is rebuilt because the cached one would not decrypt, restore's prefix
+    #       match then takes the newer entry, and the old one ages out
+    - name: Save the guest this run cached
+      if: always() && steps.main.outputs.cache-save-key != ''
+      uses: actions/cache/save@v6.1.0
+      with:
+        path: ${{ env.MVM_BLOB_DIR }}/${{ steps.main.outputs.cache-save-key }}.tar.zst.age
+        key: mavericks-vm-${{ steps.main.outputs.cache-save-key }}-${{ github.run_id }}-${{ github.run_attempt }}

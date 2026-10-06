@@ -1,0 +1,61 @@
+name: self-test
+
+# spec: docs/superpowers/plans/2026-10-06-mavericks-vm.md Task 12 (in packer-plugin-macosx) -- the
+#       Action used on itself against the real cached guest: one guest per job (each binds the same
+#       SSH port), so the sync modes and a CPU model are a matrix. A cold key makes this the warmer.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: >-
+    self-test-${{ github.event_name == 'pull_request'
+                  && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  guest:
+    # spec: README.md -- a fork's pull request has no image-key, and is told so by the Action itself;
+    #       skipping it here keeps a fork's PR from going red for that alone
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { sync: rsync, cpu-model: 'Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2', brand: Penryn }
+          # spec: tests/inputs.bats -- Nehalem names no vendor, so the Action adds GenuineIntel's
+          - { sync: scp, cpu-model: Nehalem, brand: Nehalem }
+          - { sync: tar, cpu-model: 'Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2', brand: Penryn }
+    steps:
+      - uses: actions/checkout@v7
+      - name: Record the runner
+        run: |
+          grep -m1 'model name' /proc/cpuinfo; grep -m1 vendor_id /proc/cpuinfo
+          df -h / /mnt; nproc; free -g
+      - uses: ./
+        with:
+          image-key: ${{ secrets.MAVERICKS_VM_KEY }}
+          sync: ${{ matrix.sync }}
+          cpu-model: ${{ matrix.cpu-model }}
+          debug-on-error: true
+          envs: 'ROUNDTRIP'
+          run: |
+            test "$(sw_vers -productVersion)" = 10.9.5
+            test "$(sw_vers -buildVersion)" = 13F1911
+            sysctl -n machdep.cpu.brand_string | grep -q '${{ matrix.brand }}'
+            test "$(pwd)" = "$GITHUB_WORKSPACE" || test "$(pwd)" = '${{ github.workspace }}'
+            printf '%s\n' "$ROUNDTRIP" > roundtrip.txt
+        env:
+          ROUNDTRIP: from the guest via ${{ matrix.sync }}
+      - name: The guest's file came back
+        run: test "$(cat roundtrip.txt)" = 'from the guest via ${{ matrix.sync }}'
+      - name: Later steps reach the guest
+        shell: mavericks {0}
+        run: test "$(sw_vers -productVersion)" = 10.9.5

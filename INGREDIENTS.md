@@ -31,3 +31,15 @@ dispatch it is a fix every consumer's CI keeps failing without.
 ## Conformance deviations
 
 - scheme: this repo is its own upstream and ships a GitHub Action consumed through a moving major tag, so it versions itself as semver `v1.0.<commit count>` (shipyard's shape), with no -mavericks.N axis to carry.
+
+## Upstream release notes
+
+No upstream release notes: mavericks-vm is its own upstream (original Mavergreen code), so there
+are no someone-else's notes for a release to link.
+
+## No repackage-on-ingredient-bump caller
+
+The plugin pin is a file-based ingredient, but every push to main already cuts a release (the
+release model above), so a Renovate bump of `components/packer-plugin-macosx/version` releases
+when it merges; a caller would only dispatch a second, identical release. The bump's other effect,
+a new cache key, is `warmer.yml`'s job.

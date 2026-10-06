@@ -1,0 +1,32 @@
+name: evict
+
+# spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "The cache" (in packer-plugin-macosx)
+#       -- prune cached guests older than 30 days, never the current key; the registry reports no
+#       last-pulled time, so age is by creation
+on:
+  schedule:
+    - cron: '41 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  evict:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Delete cached guests older than 30 days, except the current key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          keep="$(bash scripts/key.sh)"
+          cutoff="$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          gh api --paginate "orgs/Mavergreen/packages/container/mavericks-vm-images/versions" \
+            --jq ".[] | select(.created_at < \"$cutoff\") | select((.metadata.container.tags | index(\"$keep\")) | not) | .id" \
+          | while read -r id; do
+              echo "deleting package version $id"
+              gh api -X DELETE "orgs/Mavergreen/packages/container/mavericks-vm-images/versions/$id"
+            done

@@ -1,0 +1,126 @@
+name: release
+
+# spec: INGREDIENTS.md "Release model" -- auto-cut on main, shipyard's shape: every push to main
+#       builds, gates and publishes v1.0.<commit count>, then moves @v1 forward; a pull request
+#       builds and gates only
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      local_release:
+        description: Accepted for the family's shape; every push to main already releases
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# spec: claude-plugins/mavergreen/skills/mavergreen-conventions/SKILL.md check 1b -- a run that can
+#       publish is alone in its group and cancelled by nothing; only a pull request supersedes
+concurrency:
+  group: >-
+    release-${{ github.event_name == 'pull_request'
+                && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.full }}
+      tag: ${{ steps.ver.outputs.tag }}
+      publish: ${{ steps.ver.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # build/version.sh counts commits; the notes generator refuses a shallow clone
+
+      - name: Install mavericks-shipyard
+        uses: Mavergreen/shipyard/.github/actions/install@v1
+
+      - name: Install bats and shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats shellcheck
+
+      - name: Record the pre-build tree
+        run: sh "$SHIPYARD_SCRIPTS/assert-tree-clean.sh" --record
+
+      - name: Version (v1.0.N) + publish decision
+        id: ver
+        env:
+          IS_MAIN_PUSH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+        run: |
+          set -eu
+          out="$(sh build/version.sh)"
+          full="$(printf '%s\n' "$out" | sed -n 's/^FULL=//p')"
+          tag="$(printf '%s\n' "$out" | sed -n 's/^TAG=//p')"
+          rel=no
+          if [ "$IS_MAIN_PUSH" = true ]; then rel=yes; fi
+          { echo "full=$full"; echo "tag=$tag"; echo "release=$rel"; } >> "$GITHUB_OUTPUT"
+          echo "version=$full tag=$tag release=$rel"
+
+      - name: Run the repo's tests
+        run: sh "$SHIPYARD_SCRIPTS/run-repo-tests.sh"
+
+      - name: shellcheck
+        run: shellcheck scripts/*.sh build/*.sh
+
+      - name: The build must not have written into the source tree
+        run: sh "$SHIPYARD_SCRIPTS/assert-tree-clean.sh"
+
+      # spec: claude-plugins/mavergreen/skills/mavergreen-conventions/SKILL.md check 14 -- the body
+      #       comes from the shared generator; an Action ships its source, so the asset is the tree
+      - name: Release notes and the source tarball
+        run: |
+          set -eu
+          mkdir -p release
+          sh "$SHIPYARD_SCRIPTS/release-notes.sh" \
+            --tag '${{ steps.ver.outputs.tag }}' --version '${{ steps.ver.outputs.full }}' \
+            --product mavericks-vm --out release/RELEASE_NOTES.md
+          git archive --prefix='mavericks-vm-${{ steps.ver.outputs.full }}/' \
+            -o 'release/mavericks-vm-${{ steps.ver.outputs.full }}.tar.gz' HEAD
+          ls -l release
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mavericks-vm
+          path: release/*
+
+  publish:
+    needs: [build]
+    if: needs.build.outputs.publish == 'yes'
+    permissions:
+      contents: write
+    uses: Mavergreen/shipyard/.github/workflows/publish-release.yml@v1
+    with:
+      version: ${{ needs.build.outputs.tag }}
+      artifact: mavericks-vm
+
+  major-tag:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Move the major tag
+        run: |
+          set -eu
+          major='${{ needs.build.outputs.tag }}'; major="${major%%.*}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # platform: an unconditional force-push let two overlapping releases move shipyard's v1
+          #           BACKWARDS on 2026-09-16; moving only forward is monotonic in any finishing order
+          git fetch --force origin "refs/tags/$major:refs/tags/$major" 2>/dev/null || true
+          if git rev-parse -q --verify "$major^{commit}" >/dev/null 2>&1 \
+             && git merge-base --is-ancestor HEAD "$major^{commit}"; then
+            echo "$major is already at or ahead of $(git rev-parse --short HEAD); leaving it alone"
+            exit 0
+          fi
+          git tag -f -a "$major" -m "$major -> ${{ needs.build.outputs.tag }}"
+          git push -f origin "$major"
+          echo "moved $major -> $(git rev-parse --short HEAD)"

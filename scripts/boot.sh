@@ -64,16 +64,20 @@ Host mavericks
   ConnectTimeout 10
 SSHCONFIG
 
-waited=0; limit="${MVM_SSH_TIMEOUT:-600}"; every="${MVM_SSH_INTERVAL:-5}"
+limit="${MVM_SSH_TIMEOUT:-600}"; every="${MVM_SSH_INTERVAL:-5}"
+# spec: tests/boot.bats -- the timeout is wall-clock time: an attempt against a guest whose sshd
+#       never answers itself takes up to ConnectTimeout, so counting only the sleeps between
+#       attempts made a 600 s timeout take 30 minutes (Actions run 37539764898)
+start=$SECONDS
 # platform: OpenSSH reads ~/.ssh/config from the passwd entry's home, not $HOME, so every ssh
 #           this Action runs names the file it wrote (measured 2026-10-06: with HOME elsewhere, a
 #           bare "ssh mavericks" never found the host)
 until ssh -F "$HOME/.ssh/config" mavericks true 2>/dev/null; do
-  if [ "$waited" -ge "$limit" ]; then
+  if [ $((SECONDS - start)) -ge "$limit" ]; then
     echo "::error title=mavericks-vm::the guest did not answer SSH within ${limit}s; the end of its serial log:"
     tail -n 40 "$data/serial.log" 2>/dev/null || echo "(no serial log)"
     exit 1
   fi
-  sleep "$every"; waited=$((waited + every))
+  sleep "$every"
 done
-echo "boot.sh: the guest answered SSH after ${waited}s"
+echo "boot.sh: the guest answered SSH after $((SECONDS - start))s"

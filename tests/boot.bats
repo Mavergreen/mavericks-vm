@@ -74,6 +74,16 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     [[ "$output" == *"panic(cpu 0"* ]] || false
 }
 
+# spec: the timeout is wall-clock time: each attempt against an unanswering guest can itself take
+#       ConnectTimeout, so counting only the sleeps between attempts tripled it on GitHub (Actions
+#       run 37539764898: a 600 s timeout took 30 minutes)
+@test "the SSH timeout counts the attempts' own time, not only the sleeps between them" {
+    start=$SECONDS
+    STUB_SSH_HANG=2 run boot "$BOX"
+    [ "$status" -ne 0 ]
+    [ $((SECONDS - start)) -le 5 ] || { echo "took $((SECONDS - start))s for a 2s timeout"; false; }
+}
+
 @test "a runner without /dev/kvm is refused, by name" {
     MVM_KVM=/nonexistent run boot "$BOX"
     [ "$status" -ne 0 ]

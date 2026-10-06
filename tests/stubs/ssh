@@ -3,6 +3,9 @@
 # the guest is this machine, so a remote command runs here, under bash, with this stdin --
 # which is how the tests see a script's cd, env and exit status.
 printf 'ssh %s\n' "$*" >> "$STUB_LOG"
+# STUB_SSH_HANG=<seconds>: an attempt takes that long to fail, as one does against QEMU's port
+# forward when the guest's sshd never answers ("Connection timed out during banner exchange").
+[ -z "${STUB_SSH_HANG:-}" ] || [ -n "${STUB_SSH_UP:-}" ] || { sleep "$STUB_SSH_HANG"; echo "Connection timed out during banner exchange" >&2; exit 255; }
 [ -n "${STUB_SSH_UP:-}" ] || { echo "ssh: connect to host 127.0.0.1 port 2222: Connection refused" >&2; exit 255; }
 while [ $# -gt 0 ]; do case "$1" in -F|-o|-p|-i) shift 2;; -*) shift;; *) break;; esac; done
 shift   # the host

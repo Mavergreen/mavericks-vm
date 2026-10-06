@@ -1,0 +1,4 @@
+#!/bin/bash
+# A stand-in sudo: the "guest" is this machine, which has no vagrant user to chown to.
+[ "$1" = chown ] && exit 0
+"$@"

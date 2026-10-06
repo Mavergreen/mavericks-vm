@@ -1,4 +1,11 @@
 #!/bin/bash
+# A stand-in ssh. Records argv in $STUB_LOG. With STUB_SSH_UP set it "reaches the guest":
+# the guest is this machine, so a remote command runs here, under bash, with this stdin --
+# which is how the tests see a script's cd, env and exit status.
 printf 'ssh %s\n' "$*" >> "$STUB_LOG"
 [ -n "${STUB_SSH_UP:-}" ] || { echo "ssh: connect to host 127.0.0.1 port 2222: Connection refused" >&2; exit 255; }
-exit 0
+while [ $# -gt 0 ]; do case "$1" in -F|-o|-p|-i) shift 2;; -*) shift;; *) break;; esac; done
+shift   # the host
+[ $# -gt 0 ] || exit 0
+# Like ssh, the remote command does not inherit this side's environment.
+exec env -i PATH="$PATH" HOME="$HOME" STUB_LOG="$STUB_LOG" bash -c "$*"

@@ -1,0 +1,2 @@
+#!/bin/bash
+printf "scp %s\n" "$*" >> "$STUB_LOG"

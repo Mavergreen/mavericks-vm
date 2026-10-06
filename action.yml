@@ -1,0 +1,112 @@
+name: mavericks-vm
+description: Run commands in a KVM-accelerated Mac OS X 10.9 guest on a Linux runner, vmactions-style
+author: Mavergreen
+
+# spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md (in Mavergreen/packer-plugin-macosx)
+#       -- the inputs are vmactions freebsd-vm v1.5.9's, by name, meaning and default, plus
+#       image-key and cpu-model; tests/inputs.bats holds the table
+inputs:
+  osname:
+    description: The OS name. Only mavericks.
+    default: mavericks
+  prepare:
+    description: Commands run in the guest before run
+  run:
+    description: Commands run in the guest
+  release:
+    description: The Mac OS X release. Only 10.9.
+    default: '10.9'
+  arch:
+    description: The guest architecture. Only x86_64.
+    default: x86_64
+  envs:
+    description: Names of environment variables to pass into the guest
+  mem:
+    description: Guest memory in MiB
+    default: '4096'
+  cpu:
+    description: Guest CPU cores
+    default: '2'
+  nat:
+    description: 'Port forwards from the runner to the guest, as "host": "guest" lines (udp:"host" for UDP)'
+  usesh:
+    description: Accepted and ignored, as vmactions does. prepare and run always use sh.
+  sync:
+    description: How the workspace reaches the guest and back -- rsync (default), scp, tar or no
+    default: rsync
+  copyback:
+    description: Copy the workspace back from the guest after run
+    default: 'true'
+  debug:
+    description: Print debug output
+  data-dir:
+    description: Where the guest's images live on the runner (default /mnt/mavericks-vm)
+  cache-dir:
+    description: Where the build's downloads are cached on the runner (default under data-dir)
+  sync-time:
+    description: Set the guest's clock from the runner's before run
+  disable-cache:
+    description: Never pull or push the cached guest; always build it
+    default: 'false'
+  cache-after-prepare:
+    description: Cache the guest again after prepare, so later runs with the same prepare skip it
+    default: 'false'
+  cache-after-prepare-key-suffix:
+    description: Extra value in the cache-after-prepare key; change it to run prepare again
+    default: ''
+  debug-on-error:
+    description: On failure, print the guest's logs (a live screen is not yet supported)
+    default: ''
+  vnc-password:
+    description: Accepted for vmactions compatibility; unused until debug-on-error offers a screen
+    default: ''
+  custom-shell-name:
+    description: The name of the shell later steps may use as "shell <name> {0}"
+    default: mavericks
+  token:
+    description: The GitHub token that pulls and pushes the cached guest (needs packages read/write)
+    default: ${{ github.token }}
+  image-key:
+    description: The org secret MAVERICKS_VM_KEY, which decrypts and encrypts the cached guest
+  cpu-model:
+    description: The guest CPU model, as QEMU's -cpu; one that names no vendor gets vendor=GenuineIntel, which 10.9 needs on an AMD runner
+    default: Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2
+
+outputs:
+  cache-after-prepare-hit:
+    description: true when a prepared guest was restored and prepare was skipped
+    value: ${{ steps.main.outputs.cache-after-prepare-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the inputs
+      shell: bash
+      env:
+        MVM_IN_OSNAME: ${{ inputs.osname }}
+        MVM_IN_RELEASE: ${{ inputs.release }}
+        MVM_IN_ARCH: ${{ inputs.arch }}
+        MVM_IN_MEM: ${{ inputs.mem }}
+        MVM_IN_CPU: ${{ inputs.cpu }}
+        MVM_IN_CPU_MODEL: ${{ inputs.cpu-model }}
+        MVM_IN_SYNC: ${{ inputs.sync }}
+        MVM_IN_COPYBACK: ${{ inputs.copyback }}
+        MVM_IN_USESH: ${{ inputs.usesh }}
+        MVM_IN_ENVS: ${{ inputs.envs }}
+        MVM_IN_NAT: ${{ inputs.nat }}
+        MVM_IN_HAS_IMAGE_KEY: ${{ inputs.image-key != '' }}
+        MVM_IN_DISABLE_CACHE: ${{ inputs.disable-cache }}
+        MVM_IN_CACHE_AFTER_PREPARE: ${{ inputs.cache-after-prepare }}
+        MVM_IN_CACHE_AFTER_PREPARE_KEY_SUFFIX: ${{ inputs.cache-after-prepare-key-suffix }}
+        MVM_IN_CUSTOM_SHELL_NAME: ${{ inputs.custom-shell-name }}
+        MVM_IN_DATA_DIR: ${{ inputs.data-dir }}
+        MVM_IN_CACHE_DIR: ${{ inputs.cache-dir }}
+        MVM_IN_DEBUG: ${{ inputs.debug }}
+        MVM_IN_SYNC_TIME: ${{ inputs.sync-time }}
+        MVM_IN_DEBUG_ON_ERROR: ${{ inputs.debug-on-error }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/inputs.sh"
+
+    - name: Run in Mavericks
+      id: main
+      shell: bash
+      run: echo "cache-after-prepare-hit=false" >> "$GITHUB_OUTPUT"

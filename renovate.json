@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>Mavergreen/shipyard"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "packer-plugin-macosx, which builds the guest. Its release tag is part of the cache key, so a bump means the next consumer run (or the warmer) builds and pushes a new guest. Tags are v0.YYYYMMDD.N.",
+      "managerFilePatterns": ["/^components/packer-plugin-macosx/version$/"],
+      "matchStrings": ["^(?<currentValue>v[0-9][^\\s#]*)\\s*$"],
+      "depNameTemplate": "Mavergreen/packer-plugin-macosx",
+      "datasourceTemplate": "github-releases"
+    }
+  ]
+}

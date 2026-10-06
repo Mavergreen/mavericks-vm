@@ -1,0 +1,17 @@
+name: conventions
+
+# spec: claude-plugins/mavergreen/skills/mavergreen-conventions/SKILL.md check 1 onward -- the family
+#       conventions gate; every check lives in shipyard, so adding one never touches this file. It
+#       passes trivially until release.yml exists (Task 12 of
+#       packer-plugin-macosx's docs/superpowers/plans/2026-10-06-mavericks-vm.md), and is wired now
+#       so that the first run against release.yml is not the gate's first run.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  conventions:
+    uses: Mavergreen/shipyard/.github/workflows/family-conventions.yml@v1

@@ -1,0 +1,4 @@
+#!/bin/bash
+# A stand-in: the guest-side reboot, logged and never run on this machine.
+printf "%s %s\n" "reboot" "$*" >> "${STUB_LOG:-/dev/null}"
+exit 0

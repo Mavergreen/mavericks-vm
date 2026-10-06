@@ -1,0 +1,4 @@
+#!/bin/bash
+# A stand-in: the guest-side date, logged and never run on this machine.
+printf "%s %s\n" "date" "$*" >> "${STUB_LOG:-/dev/null}"
+exit 0

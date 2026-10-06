@@ -1,4 +1,11 @@
 #!/bin/bash
-# A stand-in sudo: the "guest" is this machine, which has no vagrant user to chown to.
-[ "$1" = chown ] && exit 0
-"$@"
+# A stand-in sudo for the stand-in guest, which IS this machine. It runs only the harmless
+# commands the Action's guest-side scripts use, and refuses everything else -- above all
+# shutdown, reboot and date: on 2026-10-06 a pass-through stub here let snapshot.sh's
+# `sudo shutdown -h now` power off the developer's own host, twice.
+printf 'sudo %s\n' "$*" >> "${STUB_LOG:-/dev/null}"
+case "$1" in
+  chown|automount) exit 0 ;;            # no vagrant user here; no auto_master to reread
+  mkdir|sed) exec "$@" ;;
+  *) echo "stub sudo: refusing '$1' (not on the allowlist in tests/stubs/sudo)" >&2; exit 1 ;;
+esac

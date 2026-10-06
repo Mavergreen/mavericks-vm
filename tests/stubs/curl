@@ -1,0 +1,6 @@
+#!/bin/bash
+# A stand-in curl: serves $STUB_TEMPLATE_ZIP for any URL, recording it in $STUB_LOG.
+out=""; url=""
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -*) shift;; *) url="$1"; shift;; esac; done
+printf 'curl %s\n' "$url" >> "$STUB_LOG"
+cp "$STUB_TEMPLATE_ZIP" "$out"

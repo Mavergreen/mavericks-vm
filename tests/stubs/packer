@@ -1,0 +1,17 @@
+#!/bin/bash
+# A stand-in packer: records argv in $STUB_LOG; `build` writes a fake Vagrant box where the
+# Mavericks template would, or fails when STUB_PACKER_FAIL is set.
+printf 'packer %s\n' "$*" >> "$STUB_LOG"
+case "$1" in
+  plugins|init) exit 0 ;;
+  build)
+    if [ -n "${STUB_PACKER_FAIL:-}" ]; then
+      for i in $(seq 1 60); do echo "packer line $i"; done
+      echo "Build 'qemu.mavericks' errored: the host check refused"; exit 1
+    fi
+    printf 'PACKER_CACHE_DIR=%s\n' "${PACKER_CACHE_DIR:-}" >> "$STUB_LOG"
+    mkdir -p output s && printf disk > s/box_0.img && printf code > s/OVMF_CODE.fd \
+      && printf vars > s/OVMF_VARS.fd && printf oc > s/opencore.img && printf '{}' > s/metadata.json \
+      && tar -C s -czf output/mavericks-10.9.5-libvirt.box . ;;
+  *) exit 2 ;;
+esac

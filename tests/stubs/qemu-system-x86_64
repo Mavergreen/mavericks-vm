@@ -1,0 +1,7 @@
+#!/bin/bash
+# A stand-in QEMU: records its argv (one per line) in $STUB_QEMU_ARGV and "daemonizes".
+printf '%s\n' "$@" > "$STUB_QEMU_ARGV"
+pid=""; prev=""
+for a in "$@"; do [ "$prev" = -pidfile ] && pid="$a"; prev="$a"; done
+[ -n "$pid" ] && echo 4242 > "$pid"
+exit 0

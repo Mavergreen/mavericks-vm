@@ -1,0 +1,4 @@
+#!/bin/bash
+printf 'qemu-img %s\n' "$*" >> "$STUB_LOG"
+[ "$1" = create ] && touch "${!#}"
+exit 0

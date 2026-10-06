@@ -1,0 +1,24 @@
+#!/bin/bash
+# A stand-in for age: "encrypts" by prepending a header naming the recipient, and
+# "decrypts" only with the identity whose recipient that is. Records argv in $STUB_LOG.
+printf 'age %s\n' "$*" >> "$STUB_LOG"
+mode=enc; recipient=""; out=""; in=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -d) mode=dec; shift ;;
+    -i) [ "$2" = - ] || { echo "stub age: identity must come from stdin" >&2; exit 2; }; shift 2 ;;
+    -r) recipient="$2"; shift 2 ;;
+    -o) out="$2"; shift 2 ;;
+    *) in="$1"; shift ;;
+  esac
+done
+w() { if [ -n "$out" ] && [ "$out" != - ]; then cat > "$out"; else cat; fi; }
+if [ "$mode" = enc ]; then
+  { printf 'STUBAGE recipient=%s\n' "$recipient"; cat; } | w
+else
+  identity="$(cat)"
+  want="age1stub$(printf '%s' "$identity" | sha256sum | cut -c1-8)"
+  first="$(head -1 "$in")"
+  [ "$first" = "STUBAGE recipient=$want" ] || { echo "age: error: no identity matched any of the recipients" >&2; exit 1; }
+  tail -n +2 "$in" | w
+fi

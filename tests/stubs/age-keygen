@@ -1,0 +1,4 @@
+#!/bin/bash
+printf 'age-keygen %s\n' "$*" >> "$STUB_LOG"
+[ "$1" = -y ] || exit 2
+printf 'age1stub%s\n' "$(cat | tr -d '\n' | sha256sum | cut -c1-8)"

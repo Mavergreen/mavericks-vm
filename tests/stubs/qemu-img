@@ -1,4 +1,4 @@
 #!/bin/bash
 printf 'qemu-img %s\n' "$*" >> "$STUB_LOG"
-[ "$1" = create ] && touch "${!#}"
+case "$1" in create|convert) touch "${!#}";; esac
 exit 0

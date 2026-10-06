@@ -12,6 +12,27 @@ box="$data/box"
 mkdir -p "$data"
 step() { bash "$here/$1" "${@:2}"; }
 
+# spec: tests/safety.bats -- GitHub masks a value that came from a secret, but not one that came
+#       from anywhere else; masking it here covers both
+if [ -n "${MVM_IMAGE_KEY:-}" ]; then echo "::add-mask::$MVM_IMAGE_KEY"; fi
+
+# shellcheck disable=SC2317  # finish runs from the EXIT trap below
+finish() {
+  status=$1
+  if [ "$status" -ne 0 ] && [ "${MVM_DEBUG_ON_ERROR:-false}" = true ]; then
+    echo "::group::mavericks-vm: the guest's system.log and serial console"
+    ssh -F "$HOME/.ssh/config" mavericks 'tail -n 100 /var/log/system.log' 2>&1 || true
+    tail -n 40 "$data/serial.log" 2>/dev/null || true
+    echo "::endgroup::"
+  fi
+  # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Safety" -- the decrypted guest
+  #       leaves the disk when the step ends; a running QEMU keeps the files it has open, so later
+  #       steps' ssh and custom shell still work (a composite action has no post step to do this)
+  find "$data/box" "$data/prepared" -mindepth 1 -delete 2>/dev/null || true
+  exit "$status"
+}
+trap 'finish $?' EXIT
+
 prepared_hit=false
 key="" pkey=""
 

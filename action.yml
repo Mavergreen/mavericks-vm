@@ -106,7 +106,18 @@ runs:
         MVM_IN_DEBUG_ON_ERROR: ${{ inputs.debug-on-error }}
       run: bash "$GITHUB_ACTION_PATH/scripts/inputs.sh"
 
+    - name: Install QEMU, age, oras and packer
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/install-tools.sh"
+
+    # spec: tests/safety.bats -- the only step that receives image-key; the input check above learns
+    #       only whether it was given
     - name: Run in Mavericks
       id: main
       shell: bash
-      run: echo "cache-after-prepare-hit=false" >> "$GITHUB_OUTPUT"
+      env:
+        MVM_PREPARE: ${{ inputs.prepare }}
+        MVM_RUN: ${{ inputs.run }}
+        MVM_IMAGE_KEY: ${{ inputs.image-key }}
+        MVM_TOKEN: ${{ inputs.token }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/main.sh"

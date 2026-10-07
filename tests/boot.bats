@@ -37,7 +37,10 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     STUB_SSH_UP=1 run boot "$BOX"
     [ "$status" -eq 0 ]
     grep -q "^qemu-img create -f qcow2 -F qcow2 -b $BOX/box_0.img $MVM_DATA_DIR/" "$STUB_LOG"
-    grep -q "^id=target,if=none,format=qcow2,file=$MVM_DATA_DIR/" "$STUB_QEMU_ARGV"
+    # spec: zeros a guest writes (diskutil secureErase, a test's dd) become holes, not stored
+    #       blocks: a zero-fill grew an overlay by 51.7 GB without it and by 344 MB with it
+    #       (packer-plugin-macosx TestTheTargetDriveStoresZerosAsHoles, measured 2026-10-07)
+    grep -q "^id=target,if=none,format=qcow2,detect-zeroes=unmap,discard=unmap,file=$MVM_DATA_DIR/" "$STUB_QEMU_ARGV"
 }
 
 @test "cpu-model reaches -cpu unchanged" {

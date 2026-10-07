@@ -44,7 +44,7 @@ env -u MVM_IMAGE_KEY -u MVM_TOKEN qemu-system-x86_64 \
   -device ich9-usb-uhci3,masterbus=usb.0,firstport=4,bus=pcie.0,addr=0x1d.2 \
   -drive "id=opencore,if=none,format=raw,snapshot=on,file=$box/opencore.img" \
   -device usb-storage,bus=usb.0,drive=opencore \
-  -drive "id=target,if=none,format=qcow2,file=$overlay" \
+  -drive "id=target,if=none,format=qcow2,detect-zeroes=unmap,discard=unmap,file=$overlay" \
   -device ide-hd,bus=ide.0,drive=target \
   -netdev "user,id=net0,$fwd" -device e1000-82545em,netdev=net0 \
   -device usb-kbd,bus=usb.0 -device usb-mouse,bus=usb.0 -device VGA,vgamem_mb=64 \

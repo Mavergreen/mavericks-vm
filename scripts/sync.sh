@@ -31,7 +31,14 @@ else
   [ "${MVM_COPYBACK:-true}" = true ] || exit 0
   case "${MVM_SYNC:-rsync}" in
     rsync) rsync -a -e "ssh -F $cfg" "mavericks:$ws/" "$ws/" ;;
-    scp) scp -F "$cfg" -r -q "mavericks:$ws/." "$ws/" ;;
+    # spec: tests/run.bats -- scp writes into each existing file in place, which a read-only one
+    #       (every git object) refuses, so it lands in an empty directory first and replaces the
+    #       workspace's files from there
+    scp) base="${MVM_DATA_DIR:-${RUNNER_TEMP:-/tmp}}"; mkdir -p "$base"
+         stage="$(mktemp -d "$base/copyback.XXXXXX")"
+         scp -F "$cfg" -r -q "mavericks:$ws/." "$stage/"
+         cp -R --remove-destination "$stage/." "$ws/"
+         find "$stage" -delete ;;
     tar) ssh_ "tar -C $wsq -cf - ." | tar -C "$ws" -xf - ;;
     no) ;;
   esac

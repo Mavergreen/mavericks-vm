@@ -62,6 +62,18 @@ run_() { bash "$REPO/scripts/run.sh" "$@"; }
     grep -q "^ssh -F $HOME/.ssh/config mavericks .*auto_master" "$STUB_LOG"
 }
 
+# spec: git writes its objects read-only, and scp copies back by opening each existing file for
+#       writing, so every one was refused (Actions run 37552520225); rsync and tar replace files
+@test "scp copies back over read-only files, as git's objects are" {
+    export STUB_GUEST_ROOT="$BATS_TEST_TMPDIR/guest"
+    mkdir -p "$STUB_GUEST_ROOT$GITHUB_WORKSPACE"
+    printf 'from the guest\n' > "$STUB_GUEST_ROOT$GITHUB_WORKSPACE/object"
+    printf 'old\n' > "$GITHUB_WORKSPACE/object"; chmod 444 "$GITHUB_WORKSPACE/object"
+    MVM_SYNC=scp run sync_ out
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(cat "$GITHUB_WORKSPACE/object")" = 'from the guest' ]
+}
+
 @test "copyback: false copies nothing back" {
     MVM_COPYBACK=false run sync_ out
     [ "$status" -eq 0 ]

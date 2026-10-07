@@ -3,6 +3,14 @@
 printf 'oras %s\n' "$*" >> "$STUB_LOG"
 cmd="$1"; shift
 tag_of() { printf '%s' "${1##*:}"; }
+# STUB_ORAS_FAIL_PULLS / STUB_ORAS_FAIL_PUSHES=<n>: the first n of each are cut off mid-transfer,
+# as GHCR did to three jobs at once (Actions run 37620368526)
+cut_off() {  # $1 = pull|push
+  case "$1" in pull) n="${STUB_ORAS_FAIL_PULLS:-0}" ;; push) n="${STUB_ORAS_FAIL_PUSHES:-0}" ;; esac
+  c="$STUB_REGISTRY/.$1-attempts"; k=$(( $(cat "$c" 2>/dev/null || echo 0) + 1 )); echo "$k" > "$c"
+  [ "$k" -gt "$n" ] && return 1
+  echo "Error: failed to copy content: copy failed: stream error: stream ID 1; PROTOCOL_ERROR; received from peer" >&2
+}
 case "$cmd" in
   login) cat > /dev/null; exit 0 ;;
   manifest)
@@ -11,12 +19,14 @@ case "$cmd" in
     [ -f "$STUB_REGISTRY/$t/blob" ] && { echo '{}'; exit 0; }
     echo "Error: $2: not found" >&2; exit 1 ;;
   pull)
+    cut_off pull && exit 1
     ref="$1"; shift; out=.
     while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; *) shift;; esac; done
     t="$(tag_of "$ref")"
     [ -f "$STUB_REGISTRY/$t/blob" ] || { echo "Error: $ref: not found" >&2; exit 1; }
     cp "$STUB_REGISTRY/$t/blob" "$out/box.tar.zst.age" ;;
   push)
+    cut_off push && exit 1
     ref="$1"; file="${2%%:*}"; t="$(tag_of "$ref")"
     mkdir -p "$STUB_REGISTRY/$t" && cp "$file" "$STUB_REGISTRY/$t/blob" ;;
   *) exit 2 ;;

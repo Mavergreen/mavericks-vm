@@ -40,9 +40,21 @@ exists() {
   exit 1
 }
 
+# spec: tests/image.bats -- GHCR cut three jobs' 6.8 GB downloads off at once mid-transfer
+#       ("stream error ... PROTOCOL_ERROR; received from peer") while a fourth, the same minute, went
+#       through (Actions run 37620368526); a dropped transfer is tried twice more before it fails
+tries() {  # $@ = the transfer; 3 attempts, waiting MVM_RETRY_WAIT (default 20) s, then twice that
+  local n=1 wait="${MVM_RETRY_WAIT:-20}"
+  until "$@"; do
+    [ "$n" -lt 3 ] || return 1
+    echo "image.sh: attempt $n of 3 failed; trying again in $((wait * n))s" >&2
+    sleep $((wait * n)); n=$((n + 1))
+  done
+}
+
 if [ "$cmd" = pull ]; then
   exists || { echo "image.sh: no cached guest under $key"; exit 3; }
-  if [ "$store" = file ]; then cp "$blob" "$work/box.tar.zst.age"; else oras pull "$ref" -o "$work" > /dev/null; fi
+  if [ "$store" = file ]; then cp "$blob" "$work/box.tar.zst.age"; else tries oras pull "$ref" -o "$work" > /dev/null; fi
   mkdir -p "$work/unpacked"
   # spec: tests/image.bats -- age authenticates what it decrypts, so a corrupt or foreign blob
   #       fails here; the guest reaches <dir> only once all of it has decrypted and unpacked
@@ -70,7 +82,7 @@ else
   if [ "$store" = file ]; then
     mkdir -p "$(dirname "$blob")" && mv "$work/box.tar.zst.age" "$blob"
   else
-    (cd "$work" && oras push "$ref" "box.tar.zst.age:application/vnd.mavergreen.mavericks-vm.box.v1+age" > /dev/null)
+    (cd "$work" && tries oras push "$ref" "box.tar.zst.age:application/vnd.mavergreen.mavericks-vm.box.v1+age" > /dev/null)
   fi
   echo "image.sh: pushed the cached guest $key"
 fi

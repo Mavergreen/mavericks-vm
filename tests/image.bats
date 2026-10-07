@@ -78,6 +78,30 @@ image() { bash "$REPO/scripts/image.sh" "$@"; }
     [ "$status" -eq 2 ]
 }
 
+# spec: GHCR cut three jobs' downloads off at once mid-transfer while a fourth, the same minute,
+#       went through (Actions run 37620368526): a transfer the registry drops is tried again
+@test "a pull the registry cuts off is tried again, and the guest arrives" {
+    run image push "$K" "$BOX"
+    STUB_ORAS_FAIL_PULLS=2 MVM_RETRY_WAIT=0 run image pull "$K" "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    diff -r "$BOX" "$BATS_TEST_TMPDIR/out"
+    [ "$(grep -c '^oras pull' "$STUB_LOG")" -eq 3 ]
+}
+
+@test "a pull cut off three times fails, with the registry's own error" {
+    run image push "$K" "$BOX"
+    STUB_ORAS_FAIL_PULLS=3 MVM_RETRY_WAIT=0 run image pull "$K" "$BATS_TEST_TMPDIR/out"
+    [ "$status" -ne 0 ]; [ "$status" -ne 3 ]
+    [[ "$output" == *"PROTOCOL_ERROR"* ]] || false
+    [ -z "$(ls -A "$BATS_TEST_TMPDIR/out" 2>/dev/null)" ]
+}
+
+@test "a push the registry cuts off is tried again" {
+    STUB_ORAS_FAIL_PUSHES=1 MVM_RETRY_WAIT=0 run image push "$K" "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ -f "$STUB_REGISTRY/$K/blob" ]
+}
+
 @test "file store: push encrypts to the blob, pull decrypts it, and the registry is never touched" {
     export MVM_STORE=file MVM_BLOB_DIR="$BATS_TEST_TMPDIR/blob"
     run image push "$K" "$BOX"

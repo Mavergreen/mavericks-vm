@@ -1,4 +1,8 @@
 #!/bin/bash
 printf 'age-keygen %s\n' "$*" >> "$STUB_LOG"
 [ "$1" = -y ] || exit 2
-printf 'age1stub%s\n' "$(cat | tr -d '\n' | sha256sum | cut -c1-8)"
+# As the real one: an identity is a line starting AGE-SECRET-KEY-1; anything else (a recipient, a
+# passphrase) is refused
+id="$(cat)"
+case "$id" in AGE-SECRET-KEY-1*) ;; *) echo "age-keygen: error: failed to parse input: no identities found" >&2; exit 1 ;; esac
+printf 'age1stub%s\n' "$(printf '%s' "$id" | tr -d '\n' | sha256sum | cut -c1-8)"

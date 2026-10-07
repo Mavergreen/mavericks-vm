@@ -23,6 +23,8 @@ exit 0
 STUB
         chmod +x "$S/$f"
     done
+    export PATH="$REPO/tests/stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
+    export MVM_IMAGE_KEY='AGE-SECRET-KEY-1MAINTESTKEY'
     export MVM_DATA_DIR="$BATS_TEST_TMPDIR/data" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"
     export MVM_DISABLE_CACHE=false MVM_CACHE_AFTER_PREPARE=false MVM_SYNC_TIME=false
     export MVM_PREPARE='echo prep' MVM_RUN='echo run'
@@ -113,4 +115,15 @@ order() { grep -oE '^[a-z-]+\.sh( (pull|push|in|out|hit|miss|--install|--prepare
     MVM_STORE=file STUB_PULL=3 MVM_RUN='fail' run main
     [ "$status" -eq 7 ]
     grep -q '^cache-save-key=kkkk' "$GITHUB_OUTPUT"
+}
+
+# spec: on a miss the key was first parsed after the 40-minute build, at the push; a recipient or a
+#       passphrase saved as the secret fails at once instead, before anything is pulled or built
+#       (final review, I4)
+@test "an image-key that is not an age identity fails at once, before any pull or build" {
+    MVM_IMAGE_KEY='age1thisisarecipientnotanidentity' run main
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"image-key"* ]] || false
+    [[ "$output" == *"AGE-SECRET-KEY-1"* ]] || false
+    [ ! -s "$CALLS" ]
 }

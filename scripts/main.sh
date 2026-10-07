@@ -24,6 +24,13 @@ pushed() {  # $1 = the key just pushed
 #       from anywhere else; masking it here covers both
 if [ -n "${MVM_IMAGE_KEY:-}" ]; then echo "::add-mask::$MVM_IMAGE_KEY"; fi
 
+# spec: tests/main.bats -- on a miss the key was first parsed at the push, after the 40-minute
+#       build; a recipient or a passphrase saved as the secret now fails here, before anything
+if ! printf '%s\n' "${MVM_IMAGE_KEY:-}" | age-keygen -y > /dev/null 2>&1; then
+  echo "::error title=mavericks-vm::image-key is not an age identity: it should be the line age-keygen prints starting AGE-SECRET-KEY-1, not the age1... public key or a passphrase"
+  exit 1
+fi
+
 # shellcheck disable=SC2317  # finish runs from the EXIT trap below
 finish() {
   status=$1

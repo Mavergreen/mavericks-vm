@@ -28,7 +28,9 @@ if [ "$1" = in ]; then
     #       empty directory, and the guest's cp -f, which replaces a file it cannot open, copies on
     scp) gstage="$(ssh_ "mktemp -d /tmp/mavericks-vm-sync.XXXXXX")"
          scp -F "$cfg" -r -q "$ws/." "mavericks:$gstage/"
-         ssh_ "cp -Rf $(printf '%q' "$gstage")/. $wsq/ && find $(printf '%q' "$gstage") -delete" ;;
+         # platform: 10.9's find refuses -delete on an absolute path ("relative path potentially
+         #           not safe", Actions run 37556570541), so the guest's copy goes with rm -R
+         ssh_ "cp -Rf $(printf '%q' "$gstage")/. $wsq/ && rm -R -f $(printf '%q' "$gstage")" ;;
     # platform: 10.9's bsdtar reads pax, which carries names longer than ustar's 100 bytes
     tar) tar -C "$ws" --format=pax -cf - . | ssh_ "tar -C $wsq -xf -" ;;
   esac

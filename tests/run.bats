@@ -83,6 +83,11 @@ run_() { bash "$REPO/scripts/run.sh" "$@"; }
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     run grep -F "mavericks:$GITHUB_WORKSPACE/" "$STUB_LOG"
     [ "$status" -ne 0 ]
+    # platform: 10.9's find refuses -delete on an absolute path ("relative path potentially not
+    #           safe", Actions run 37556570541), which GNU find here never does, so no guest
+    #           command may use it
+    run grep -E '^ssh .*find .*-delete' "$STUB_LOG"
+    [ "$status" -ne 0 ]
 }
 
 @test "copyback: false copies nothing back" {

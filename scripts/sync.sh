@@ -12,8 +12,8 @@ ssh_() { ssh -F "$cfg" mavericks "$@"; }
 wsq="$(printf '%q' "$ws")"
 
 if [ "$1" = in ]; then
-  [ "${MVM_SYNC:-rsync}" = no ] && exit 0
-  # spec: tests/run.bats -- vmactions runs in the guest at the runner's own workspace path
+  # spec: tests/run.bats -- vmactions runs in the guest at the runner's own workspace path, so
+  #       the path is made whatever sync is; sync: no only leaves it empty
   # platform: 10.9 mounts auto_home on /home, where mkdir fails "Operation not supported", and
   #           GitHub's workspaces live under /home/runner/work; switching the map off and
   #           re-reading it frees /home (MEASURED 2026-10-06 on a 10.9.5 guest). Only the
@@ -21,6 +21,7 @@ if [ "$1" = in ]; then
   ssh_ "if grep -q '^/home' /etc/auto_master 2>/dev/null; then sudo sed -i '' 's|^/home|#/home|' /etc/auto_master && sudo automount -vc > /dev/null; fi"
   ssh_ "sudo mkdir -p $wsq && sudo chown vagrant $wsq"
   case "${MVM_SYNC:-rsync}" in
+    no) ;;
     rsync) rsync -a --delete -e "ssh -F $cfg" "$ws/" "mavericks:$ws/" ;;
     scp) scp -F "$cfg" -r -q "$ws/." "mavericks:$ws/" ;;
     # platform: 10.9's bsdtar reads pax, which carries names longer than ustar's 100 bytes

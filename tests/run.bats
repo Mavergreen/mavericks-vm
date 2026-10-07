@@ -52,6 +52,16 @@ run_() { bash "$REPO/scripts/run.sh" "$@"; }
     [ "$status" -ne 0 ]
 }
 
+# spec: run.sh runs in the guest at the workspace's path whatever sync is, so with sync: no that
+#       path must still exist, empty: the self-test's warm job failed "cd: ... No such file or
+#       directory" without it (Actions run 37551775048)
+@test "no: the guest still gets the empty workspace directory, so run starts at the same path" {
+    MVM_SYNC=no run sync_ in
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q "^ssh -F $HOME/.ssh/config mavericks sudo mkdir -p" "$STUB_LOG"
+    grep -q "^ssh -F $HOME/.ssh/config mavericks .*auto_master" "$STUB_LOG"
+}
+
 @test "copyback: false copies nothing back" {
     MVM_COPYBACK=false run sync_ out
     [ "$status" -eq 0 ]

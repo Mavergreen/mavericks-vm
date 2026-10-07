@@ -51,6 +51,8 @@ env -u MVM_IMAGE_KEY -u MVM_TOKEN qemu-system-x86_64 \
   -display none -serial "file:$data/serial.log" -daemonize -pidfile "$data/qemu.pid"
 
 install -m 0600 "$root/scripts/vagrant-insecure.key" "$data/ssh-key"
+# spec: tests/boot.bats -- keepalives: a session to a guest that dies fails within about two
+#       minutes, named by ssh, instead of waiting forever
 mkdir -p "$HOME/.ssh"; chmod 0700 "$HOME/.ssh"
 cat >> "$HOME/.ssh/config" <<SSHCONFIG
 
@@ -64,6 +66,8 @@ Host mavericks
   UserKnownHostsFile /dev/null
   LogLevel ERROR
   ConnectTimeout 10
+  ServerAliveInterval 15
+  ServerAliveCountMax 8
 SSHCONFIG
 
 limit="${MVM_SSH_TIMEOUT:-600}"; every="${MVM_SSH_INTERVAL:-5}"

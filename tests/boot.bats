@@ -97,6 +97,15 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     [ "$status" -ne 0 ]
 }
 
+# spec: an ssh session to a guest that dies waits forever without keepalives; with them a dead
+#       guest fails the step within about two minutes, named by ssh
+@test "the ssh config notices a dead guest instead of waiting forever" {
+    STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qE '^ *ServerAliveInterval [0-9]+$' "$HOME/.ssh/config"
+    grep -qE '^ *ServerAliveCountMax [0-9]+$' "$HOME/.ssh/config"
+}
+
 @test "a runner without /dev/kvm is refused, by name" {
     MVM_KVM=/nonexistent run boot "$BOX"
     [ "$status" -ne 0 ]

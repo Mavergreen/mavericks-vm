@@ -43,9 +43,13 @@ exists() {
 # spec: tests/image.bats -- GHCR cut three jobs' 6.8 GB downloads off at once mid-transfer
 #       ("stream error ... PROTOCOL_ERROR; received from peer") while a fourth, the same minute, went
 #       through (Actions run 37620368526); a dropped transfer is tried twice more before it fails
+# spec: tests/image.bats -- and each attempt has a time limit (MVM_TRANSFER_TIMEOUT, 1800 s): a
+#       transfer that stalls without failing is cut off and tried again
 tries() {  # $@ = the transfer; 3 attempts, waiting MVM_RETRY_WAIT (default 20) s, then twice that
-  local n=1 wait="${MVM_RETRY_WAIT:-20}"
-  until "$@"; do
+  local n=1 wait="${MVM_RETRY_WAIT:-20}" limit="${MVM_TRANSFER_TIMEOUT:-1800}" rc
+  until timeout "$limit" "$@"; do
+    rc=$?
+    [ "$rc" -ne 124 ] || echo "image.sh: attempt $n of 3 did not finish in ${limit}s" >&2
     [ "$n" -lt 3 ] || return 1
     echo "image.sh: attempt $n of 3 failed; trying again in $((wait * n))s" >&2
     sleep $((wait * n)); n=$((n + 1))

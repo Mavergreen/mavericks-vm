@@ -102,6 +102,18 @@ image() { bash "$REPO/scripts/image.sh" "$@"; }
     [ -f "$STUB_REGISTRY/$K/blob" ]
 }
 
+# spec: retries alone cannot help a transfer that stalls without failing: each attempt has a
+#       time limit, and a stalled one is cut off and tried again
+@test "a pull that stalls is cut off and tried again" {
+    run image push "$K" "$BOX"
+    start=$SECONDS
+    STUB_ORAS_STALL_PULLS=1 MVM_TRANSFER_TIMEOUT=2 MVM_RETRY_WAIT=0 run image pull "$K" "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ $((SECONDS - start)) -le 10 ] || { echo "took $((SECONDS - start))s"; false; }
+    [[ "$output" == *"2s"* ]] || false
+    diff -r "$BOX" "$BATS_TEST_TMPDIR/out"
+}
+
 @test "file store: push encrypts to the blob, pull decrypts it, and the registry is never touched" {
     export MVM_STORE=file MVM_BLOB_DIR="$BATS_TEST_TMPDIR/blob"
     run image push "$K" "$BOX"

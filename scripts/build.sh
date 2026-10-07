@@ -23,8 +23,20 @@ tpl="$work/templates/mavericks"
 export PACKER_PLUGIN_PATH="$data/packer-plugins" PACKER_CACHE_DIR="$MVM_CACHE_DIR" CHECKPOINT_DISABLE=1
 # spec: tests/build.bats -- exactly the pinned plugin, installed before init: init alone would
 #       take the newest release its ~> constraint allows, which may be newer than the cache key says
-packer plugins install github.com/mavergreen/macosx "$pin" > /dev/null
-(cd "$tpl" && packer init . > /dev/null)
+# spec: tests/build.bats -- packer asks GitHub's API for plugins, unauthenticated unless given a
+#       token, and a shared runner's address runs out of unauthenticated requests; it reports a
+#       failure on stdout, so that is shown when it fails (a repo-cache job failed in 0.6 s, without
+#       a word, in Actions run 37635562340). The build itself, which starts QEMU, gets no token.
+quiet() {  # $@ = a packer command, run with the job's token; its output only if it fails
+  local out
+  if ! out="$(PACKER_GITHUB_API_TOKEN="${MVM_TOKEN:-}" "$@" 2>&1)"; then
+    echo "::error title=mavericks-vm::$* failed:"
+    printf '%s\n' "$out"
+    return 1
+  fi
+}
+quiet packer plugins install github.com/mavergreen/macosx "$pin"
+(cd "$tpl" && quiet packer init .)
 
 log="$work/packer-build.log"
 if ! (cd "$tpl" && packer build -var-file="$root/box.pkrvars.hcl" .) > "$log" 2>&1; then

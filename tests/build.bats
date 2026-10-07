@@ -63,3 +63,24 @@ build() { bash "$REPO/scripts/build.sh" "$@"; }
     run find "$MVM_DATA_DIR/build" -name '*.box' -o -name 'box_0.img' -o -name 'output*'
     [ -z "$output" ] || { echo "left behind: $output"; false; }
 }
+
+# spec: packer reports a failed plugin install on stdout, which build.sh threw away: a repo-cache
+#       job failed in 0.6 s with no word of why (Actions run 37635562340)
+@test "a plugin install that fails says why, in packer's own words" {
+    STUB_PACKER_INSTALL_FAIL=1 run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"API rate limit exceeded"* ]] || false
+}
+
+# spec: packer asks GitHub's API for a plugin unauthenticated unless given a token, and a shared
+#       runner's address runs out of unauthenticated requests: install and init get the job's own
+#       token; packer build, which starts QEMU, never does
+@test "plugin install and init are authenticated with the job's token, and the build is not" {
+    MVM_TOKEN=ghp_buildtoken run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qxF 'packer-token plugins set' "$STUB_LOG"
+    grep -qxF 'packer-token init set' "$STUB_LOG"
+    grep -qxF 'packer-token build ' "$STUB_LOG"
+    run grep -F ghp_buildtoken "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}

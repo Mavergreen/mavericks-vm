@@ -2,8 +2,12 @@
 # A stand-in packer: records argv in $STUB_LOG; `build` writes a fake Vagrant box where the
 # Mavericks template would, or fails when STUB_PACKER_FAIL is set.
 printf 'packer %s\n' "$*" >> "$STUB_LOG"
+printf 'packer-token %s %s\n' "$1" "${PACKER_GITHUB_API_TOKEN:+set}" >> "$STUB_LOG"
 case "$1" in
-  plugins|init) exit 0 ;;
+  plugins|init)
+    # STUB_PACKER_INSTALL_FAIL: as packer does, the reason goes to stdout
+    if [ -n "${STUB_PACKER_INSTALL_FAIL:-}" ]; then echo "Error: 403 API rate limit exceeded"; exit 1; fi
+    exit 0 ;;
   build)
     if [ -n "${STUB_PACKER_FAIL:-}" ]; then
       for i in $(seq 1 60); do echo "packer line $i"; done

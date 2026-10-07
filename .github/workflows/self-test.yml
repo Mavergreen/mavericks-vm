@@ -7,9 +7,10 @@ name: self-test
 #       is cold, and the matrix waits for it: on a cold key, three jobs that each built and pushed
 #       the same guest raced (Actions run 37539764898), and the matrix should test the hit every
 #       consumer gets
+# spec: tests/self_test_workflow.bats -- a push to main runs this from release.yml, which publishes
+#       only once it passes; a pull request runs it here
 on:
-  push:
-    branches: [main]
+  workflow_call:
   pull_request:
     branches: [main]
 

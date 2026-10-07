@@ -42,3 +42,26 @@ sys.exit(1 if bad or not jobs else 0)
 PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
+
+# spec: every real defect found on 2026-10-07 (scp over read-only git objects, 10.9's find, the
+#       empty sync: no workspace, the SSH timeout) was caught by the self-test alone, while release
+#       had already moved @v1: a release now waits for the self-test of its own commit (final
+#       review, I6)
+@test "a release publishes, and moves @v1, only after the real-guest self-test passes" {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    run python3 - "$REPO/.github/workflows/release.yml" "$REPO/.github/workflows/self-test.yml" <<'PY'
+import sys, yaml
+rel = yaml.safe_load(open(sys.argv[1]))["jobs"]
+st = yaml.safe_load(open(sys.argv[2]))
+on = st.get(True, st.get("on"))
+calls = [n for n, j in rel.items() if j.get("uses") == "./.github/workflows/self-test.yml"]
+pub = rel.get("publish", {}).get("needs", [])
+pub = [pub] if isinstance(pub, str) else pub
+ok = len(calls) == 1 and calls[0] in pub
+ok = ok and rel[calls[0]].get("secrets") == "inherit"
+ok = ok and "workflow_call" in on and "push" not in on and "pull_request" in on
+print(calls, pub, list(on))
+sys.exit(0 if ok else 1)
+PY
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+}

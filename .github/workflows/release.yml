@@ -87,8 +87,19 @@ jobs:
           name: mavericks-vm
           path: release/*
 
-  publish:
+  # spec: tests/self_test_workflow.bats -- the real-guest self-test of this very commit: unit tests
+  #       caught none of the defects it found, and @v1 reaches every consumer within minutes
+  self-test:
     needs: [build]
+    if: needs.build.outputs.publish == 'yes'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/self-test.yml
+    secrets: inherit
+
+  publish:
+    needs: [build, self-test]
     if: needs.build.outputs.publish == 'yes'
     permissions:
       contents: write

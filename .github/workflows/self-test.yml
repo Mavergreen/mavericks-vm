@@ -31,12 +31,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # spec: tests/self_test_workflow.bats -- the space check's thresholds are measured peaks:
+      #       free space on the data disk every 5 s while the Action runs (the sampler outlives
+      #       this step, to the end of the job)
+      - name: Sample the data disk while the Action runs
+        run: |
+          df -Pk /mnt | awk 'NR == 2 { print $4 }' > "$RUNNER_TEMP/free-before.kib"
+          ( while :; do df -Pk /mnt | awk 'NR == 2 { print $4 }' >> "$RUNNER_TEMP/free.kib"; sleep 5; done ) > /dev/null 2>&1 &
       - uses: ./
         with:
           image-key: ${{ secrets.MAVERICKS_VM_KEY }}
           debug-on-error: true
           sync: 'no'
           run: test "$(sw_vers -productVersion)" = 10.9.5
+      - name: The data disk's peak use
+        if: always()
+        run: |
+          before="$(cat "$RUNNER_TEMP/free-before.kib")"; low="$(sort -n "$RUNNER_TEMP/free.kib" | head -n 1)"
+          echo "peak use: $(( (before - low) / 1024 / 1024 )) GiB (free before: $(( before / 1024 / 1024 )) GiB, lowest: $(( low / 1024 / 1024 )) GiB)"
 
   guest:
     needs: warm
@@ -57,6 +69,13 @@ jobs:
         run: |
           grep -m1 'model name' /proc/cpuinfo; grep -m1 vendor_id /proc/cpuinfo
           df -h / /mnt; nproc; free -g
+      # spec: tests/self_test_workflow.bats -- the space check's thresholds are measured peaks:
+      #       free space on the data disk every 5 s while the Action runs (the sampler outlives
+      #       this step, to the end of the job)
+      - name: Sample the data disk while the Action runs
+        run: |
+          df -Pk /mnt | awk 'NR == 2 { print $4 }' > "$RUNNER_TEMP/free-before.kib"
+          ( while :; do df -Pk /mnt | awk 'NR == 2 { print $4 }' >> "$RUNNER_TEMP/free.kib"; sleep 5; done ) > /dev/null 2>&1 &
       - uses: ./
         with:
           image-key: ${{ secrets.MAVERICKS_VM_KEY }}
@@ -73,6 +92,11 @@ jobs:
             printf '%s\n' "$ROUNDTRIP" > roundtrip.txt
         env:
           ROUNDTRIP: from the guest via ${{ matrix.sync }}
+      - name: The data disk's peak use
+        if: always()
+        run: |
+          before="$(cat "$RUNNER_TEMP/free-before.kib")"; low="$(sort -n "$RUNNER_TEMP/free.kib" | head -n 1)"
+          echo "peak use: $(( (before - low) / 1024 / 1024 )) GiB (free before: $(( before / 1024 / 1024 )) GiB, lowest: $(( low / 1024 / 1024 )) GiB)"
       - name: The guest's file came back
         run: test "$(cat roundtrip.txt)" = 'from the guest via ${{ matrix.sync }}'
       - name: Later steps reach the guest

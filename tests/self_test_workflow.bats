@@ -18,3 +18,27 @@ sys.exit(0 if ok else 1)
 PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
+
+# spec: docs/superpowers/plans/2026-10-06-mavericks-vm.md Task 2 (in packer-plugin-macosx) -- the
+#       space check's thresholds are the peaks measured on real runners, so every job that uses the
+#       Action samples the data disk while it runs and reports the most it used
+@test "every self-test job that uses the Action reports the data disk's peak use" {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    run python3 - "$REPO/.github/workflows/self-test.yml" <<'PY'
+import sys, yaml
+jobs = yaml.safe_load(open(sys.argv[1]))["jobs"]
+bad = []
+for name, job in jobs.items():
+    steps = job.get("steps", [])
+    for i, s in enumerate(steps):
+        if s.get("uses") != "./":
+            continue
+        before = " ".join(str(t.get("run", "")) for t in steps[:i])
+        after = [t for t in steps[i + 1:] if "peak" in str(t.get("name", "")).lower()]
+        if "free.kib" not in before or not after or "always()" not in str(after[0].get("if", "")):
+            bad.append(name)
+print(bad)
+sys.exit(1 if bad or not jobs else 0)
+PY
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+}

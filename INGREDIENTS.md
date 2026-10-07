@@ -31,6 +31,7 @@ dispatch it is a fix every consumer's CI keeps failing without.
 ## Conformance deviations
 
 - scheme: this repo is its own upstream and ships a GitHub Action consumed through a moving major tag, so it versions itself as semver `v1.0.<commit count>` (shipyard's shape), with no -mavericks.N axis to carry.
+- release-assets: none. A GitHub Action is consumed by its tag, so a release is its notes alone (`publish-release.yml`'s `assets: none`), as vmactions publishes its own: a tarball of the tree would only copy GitHub's source downloads.
 
 ## Upstream release notes
 

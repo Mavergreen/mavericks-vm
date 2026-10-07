@@ -71,16 +71,15 @@ jobs:
         run: sh "$SHIPYARD_SCRIPTS/assert-tree-clean.sh"
 
       # spec: claude-plugins/mavergreen/skills/mavergreen-conventions/SKILL.md check 14 -- the body
-      #       comes from the shared generator; an Action ships its source, so the asset is the tree
-      - name: Release notes and the source tarball
+      #       comes from the shared generator; an Action is consumed by its tag, so the release is
+      #       its notes alone (INGREDIENTS.md "Conformance deviations")
+      - name: Release notes
         run: |
           set -eu
           mkdir -p release
           sh "$SHIPYARD_SCRIPTS/release-notes.sh" \
             --tag '${{ steps.ver.outputs.tag }}' --version '${{ steps.ver.outputs.full }}' \
             --product mavericks-vm --out release/RELEASE_NOTES.md
-          git archive --prefix='mavericks-vm-${{ steps.ver.outputs.full }}/' \
-            -o 'release/mavericks-vm-${{ steps.ver.outputs.full }}.tar.gz' HEAD
           ls -l release
 
       - uses: actions/upload-artifact@v7
@@ -97,6 +96,7 @@ jobs:
     with:
       version: ${{ needs.build.outputs.tag }}
       artifact: mavericks-vm
+      assets: none
 
   major-tag:
     needs: [build, publish]

@@ -84,6 +84,16 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     [ $((SECONDS - start)) -le 5 ] || { echo "took $((SECONDS - start))s for a 2s timeout"; false; }
 }
 
+# spec: QEMU daemonizes and outlives the step, so whatever is in its environment any later step
+#       can read from /proc/<pid>/environ: neither the image key nor the token may be there
+#       (final review, I2)
+@test "QEMU never inherits the image key or the registry token" {
+    MVM_IMAGE_KEY='AGE-SECRET-KEY-1NEVERINQEMU' MVM_TOKEN='ghp_neverinqemu' STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run grep -E 'NEVERINQEMU|neverinqemu' "$STUB_QEMU_ARGV.env"
+    [ "$status" -ne 0 ]
+}
+
 @test "a runner without /dev/kvm is refused, by name" {
     MVM_KVM=/nonexistent run boot "$BOX"
     [ "$status" -ne 0 ]

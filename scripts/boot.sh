@@ -31,7 +31,9 @@ done
 # spec: packer-plugin-macosx templates/mavericks/box.Vagrantfile.pkrtpl -- the box's own machine:
 #       q35 with EHCI and UHCI companions (10.9 cannot drive XHCI), OpenCore on usb-storage, the
 #       disk on IDE, e1000, VGA; the disk here is an overlay, so the cached image never changes
-qemu-system-x86_64 \
+# spec: tests/boot.bats -- QEMU daemonizes and outlives this step, and a later step can read its
+#       environment from /proc: it starts without the image key or the registry token
+env -u MVM_IMAGE_KEY -u MVM_TOKEN qemu-system-x86_64 \
   -name mavericks-vm -machine q35,vmport=off,accel=kvm \
   -cpu "${MVM_CPU_MODEL:?}" -m "${MVM_MEM:?}M" -smp "${MVM_CPU:?}" -parallel none \
   -drive "if=pflash,format=raw,unit=0,readonly=on,file=$box/OVMF_CODE.fd" \

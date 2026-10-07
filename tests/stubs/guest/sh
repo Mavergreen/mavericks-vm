@@ -1,0 +1,4 @@
+#!/bin/bash
+# The stand-in guest's sh, as 10.9's: /bin/sh there is bash, in POSIX mode. It matters: bash reads
+# a piped script a byte at a time, so a command in it can read the rest, where dash would not.
+exec bash --posix "$@"

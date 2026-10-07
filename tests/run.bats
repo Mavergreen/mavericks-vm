@@ -108,6 +108,19 @@ run_() { bash "$REPO/scripts/run.sh" "$@"; }
     [ "$status" -eq 0 ]
 }
 
+# spec: a script fed to the guest's shell on stdin is itself stdin to every command it runs, so a
+#       command that reads stdin (cat, read, a test harness) swallowed the rest of the script and
+#       the step passed (final review, I1)
+@test "a command that reads stdin cannot swallow the rest of the script" {
+    printf 'echo one > one.txt
+cat > /dev/null
+echo after > after.txt
+' > "$SCRIPT"
+    run run_ "$SCRIPT"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ -e "$GITHUB_WORKSPACE/after.txt" ]
+}
+
 @test "envs reach the guest with their values intact, and only those named" {
     printf 'printf "%%s|%%s|%%s" "$FOO" "$BAR" "${NOTME-unset}" > env.txt\n' > "$SCRIPT"
     FOO="a 'quoted' value" BAR='$(id)' NOTME=x MVM_ENVS='FOO BAR' run run_ "$SCRIPT"

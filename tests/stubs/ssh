@@ -7,11 +7,14 @@ printf 'ssh %s\n' "$*" >> "$STUB_LOG"
 # forward when the guest's sshd never answers ("Connection timed out during banner exchange").
 [ -z "${STUB_SSH_HANG:-}" ] || [ -n "${STUB_SSH_UP:-}" ] || { sleep "$STUB_SSH_HANG"; echo "Connection timed out during banner exchange" >&2; exit 255; }
 [ -n "${STUB_SSH_UP:-}" ] || { echo "ssh: connect to host 127.0.0.1 port 2222: Connection refused" >&2; exit 255; }
-while [ $# -gt 0 ]; do case "$1" in -F|-o|-p|-i) shift 2;; -*) shift;; *) break;; esac; done
+nostdin=
+while [ $# -gt 0 ]; do case "$1" in -F|-o|-p|-i) shift 2;; -n) nostdin=1; shift;; -*) shift;; *) break;; esac; done
 shift   # the host
 [ $# -gt 0 ] || exit 0
 # Like ssh, the remote command does not inherit this side's environment.
-# The guest's PATH is the stubs first and never sbin: a guest-side shutdown, reboot or date
+# The guest's PATH is the stubs first (and stubs/guest, its sh) and never sbin: a guest-side shutdown, reboot or date
 # must reach a stub, never this machine's own (see tests/stubs/sudo).
 stubs="$(cd "$(dirname "$0")" && pwd)"
-exec env -i PATH="$stubs:/usr/bin:/bin" HOME="$HOME" STUB_LOG="$STUB_LOG" bash -c "$*"
+# -n, as ssh's: the remote command reads nothing from this side's stdin
+if [ -n "$nostdin" ]; then exec < /dev/null; fi
+exec env -i PATH="$stubs/guest:$stubs:/usr/bin:/bin" HOME="$HOME" STUB_LOG="$STUB_LOG" bash -c "$*"

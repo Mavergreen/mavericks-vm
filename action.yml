@@ -123,7 +123,7 @@ runs:
       env:
         MVM_PREPARE: ${{ inputs.prepare }}
       run: |
-        if [ "$MVM_CACHE_AFTER_PREPARE" = true ]; then k="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --prepared)"; else k="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh")"; fi
+        if [ "$MVM_CACHE_AFTER_PREPARE" = true ] && [ -n "$MVM_PREPARE" ]; then k="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --prepared)"; else k="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh")"; fi
         { echo "key=$k"; echo "blob=$MVM_BLOB_DIR/$k.tar.zst.age"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore this repo's cached guest

@@ -73,7 +73,10 @@ get_base() {  # $1 = "checked" when room for a hit was already checked; leaves t
   esac
 }
 
-if [ "${MVM_CACHE_AFTER_PREPARE:-false}" = true ] && [ "${MVM_DISABLE_CACHE:-false}" != true ]; then
+# spec: tests/main.bats -- with no prepare, the prepared guest is the base guest: it is cached as
+#       the base, or the repo store, which keeps only the prepared one, kept nothing at all
+if [ "${MVM_CACHE_AFTER_PREPARE:-false}" = true ] && [ "${MVM_DISABLE_CACHE:-false}" != true ] \
+   && [ -n "${MVM_PREPARE:-}" ]; then
   pkey="$(MVM_PREPARE="${MVM_PREPARE:-}" step key.sh --prepared)" || exit 1
   step space.sh hit || exit 1
   step image.sh pull "$pkey" "$box"; rc=$?

@@ -127,3 +127,29 @@ order() { grep -oE '^[a-z-]+\.sh( (pull|push|in|out|hit|miss|--install|--prepare
     [[ "$output" == *"AGE-SECRET-KEY-1"* ]] || false
     [ ! -s "$CALLS" ]
 }
+
+# spec: with cache-after-prepare on and prepare empty, the repo store kept nothing (no base push,
+#       no prepared one), so every run built for 40 minutes; with no prepare the prepared guest is
+#       the base guest, so it is cached as the base (final review, I3)
+@test "cache-after-prepare with an empty prepare caches the base guest" {
+    MVM_STORE=file MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='' STUB_PULL=3 run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q '^image.sh push kkkk' "$CALLS"
+    grep -qxF 'cache-save-key=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk' "$GITHUB_OUTPUT"
+    run grep -q 'key.sh --prepared' "$CALLS"
+    [ "$status" -ne 0 ]
+}
+
+@test "action.yml's key step chooses the base key too when prepare is empty, so restore matches" {
+    run python3 - "$REPO/action.yml" "$BATS_TEST_TMPDIR/keystep.sh" <<'PY'
+import sys, yaml
+steps = yaml.safe_load(open(sys.argv[1]))["runs"]["steps"]
+open(sys.argv[2], "w").write(next(s for s in steps if s.get("id") == "key")["run"])
+PY
+    mkdir -p "$BATS_TEST_TMPDIR/action/scripts"; cp "$S/key.sh" "$BATS_TEST_TMPDIR/action/scripts/"
+    : > "$GITHUB_OUTPUT"
+    GITHUB_ACTION_PATH="$BATS_TEST_TMPDIR/action" MVM_BLOB_DIR=/b MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='' \
+        run bash -e "$BATS_TEST_TMPDIR/keystep.sh"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qxF 'key=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk' "$GITHUB_OUTPUT"
+}

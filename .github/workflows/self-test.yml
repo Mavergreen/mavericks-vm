@@ -2,7 +2,11 @@ name: self-test
 
 # spec: docs/superpowers/plans/2026-10-06-mavericks-vm.md Task 12 (in packer-plugin-macosx) -- the
 #       Action used on itself against the real cached guest: one guest per job (each binds the same
-#       SSH port), so the sync modes and a CPU model are a matrix. A cold key makes this the warmer.
+#       SSH port), so the sync modes and a CPU model are a matrix.
+# spec: tests/self_test_workflow.bats -- one warm job builds and pushes the shared guest if its key
+#       is cold, and the matrix waits for it: on a cold key, three jobs that each built and pushed
+#       the same guest raced (Actions run 37539764898), and the matrix should test the hit every
+#       consumer gets
 on:
   push:
     branches: [main]
@@ -20,9 +24,22 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  guest:
+  warm:
     # spec: README.md -- a fork's pull request has no image-key, and is told so by the Action itself;
     #       skipping it here keeps a fork's PR from going red for that alone
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./
+        with:
+          image-key: ${{ secrets.MAVERICKS_VM_KEY }}
+          debug-on-error: true
+          sync: 'no'
+          run: test "$(sw_vers -productVersion)" = 10.9.5
+
+  guest:
+    needs: warm
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     strategy:

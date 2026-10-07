@@ -27,6 +27,12 @@ if [ -z "${MVM_SKIP_APT:-}" ]; then
     nasm acpica-tools uuid-dev dmg2img hfsprogs busybox-static > /dev/null
   # platform: GitHub's runner user is not in the kvm group; the device is root-only by default
   sudo chmod 666 /dev/kvm
+  # platform: a cpu-model of Nehalem or later makes 10.9's kernel read MSR_FLEX_RATIO (0x194) at
+  #           boot, which KVM emulates on neither vendor: the read faults and the guest resets
+  #           in a loop. Ignored, it reads 0 and the guest boots (measured 2026-10-06, Actions run
+  #           37539764898 and packer-plugin-macosx docs/decisions/0009). The default Penryn never
+  #           reads it; the runner is disposable, so this costs nothing else
+  echo Y | sudo tee /sys/module/kvm/parameters/ignore_msrs > /dev/null
   # platform: the plugin's media microVM boots the runner's own kernel, which Ubuntu leaves
   #           readable by root alone (0600 on the 2026-10-06 runner image)
   sudo chmod 644 "/boot/vmlinuz-$(uname -r)"

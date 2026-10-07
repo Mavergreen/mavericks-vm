@@ -89,6 +89,7 @@ PY
     done
     grep -qxF "sudo chmod 644 /boot/vmlinuz-$(uname -r)" "$BATS_TEST_TMPDIR/sudo.log"
     grep -q "^sudo apt-get install .*linux-modules-extra-$(uname -r)" "$BATS_TEST_TMPDIR/sudo.log"
+    grep -qxF "sudo tee /sys/module/kvm/parameters/ignore_msrs" "$BATS_TEST_TMPDIR/sudo.log"
 }
 
 @test "install-tools pins age, oras and packer by sha256, and refuses other bytes" {

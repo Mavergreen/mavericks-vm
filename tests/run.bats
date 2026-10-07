@@ -42,7 +42,7 @@ run_() { bash "$REPO/scripts/run.sh" "$@"; }
 
 @test "scp and tar carry the workspace too; no carries nothing" {
     MVM_SYNC=scp run sync_ in
-    grep -qF "scp -F $HOME/.ssh/config -r -q $GITHUB_WORKSPACE/. mavericks:$GITHUB_WORKSPACE/" "$STUB_LOG"
+    grep -qF "scp -F $HOME/.ssh/config -r -q $GITHUB_WORKSPACE/. mavericks:" "$STUB_LOG"
     : > "$STUB_LOG"
     MVM_SYNC=tar run sync_ in
     grep -q "tar -C $GITHUB_WORKSPACE -xf -" "$STUB_LOG"
@@ -65,13 +65,24 @@ run_() { bash "$REPO/scripts/run.sh" "$@"; }
 # spec: git writes its objects read-only, and scp copies back by opening each existing file for
 #       writing, so every one was refused (Actions run 37552520225); rsync and tar replace files
 @test "scp copies back over read-only files, as git's objects are" {
-    export STUB_GUEST_ROOT="$BATS_TEST_TMPDIR/guest"
+    export STUB_SCP_COPY=1 STUB_GUEST_ROOT="$BATS_TEST_TMPDIR/guest"
     mkdir -p "$STUB_GUEST_ROOT$GITHUB_WORKSPACE"
     printf 'from the guest\n' > "$STUB_GUEST_ROOT$GITHUB_WORKSPACE/object"
     printf 'old\n' > "$GITHUB_WORKSPACE/object"; chmod 444 "$GITHUB_WORKSPACE/object"
     MVM_SYNC=scp run sync_ out
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     [ "$(cat "$GITHUB_WORKSPACE/object")" = 'from the guest' ]
+}
+
+# spec: a custom-shell step syncs in again over the guest's copy, whose git objects are read-only,
+#       and scp writes into each existing file in place (Actions run 37554261002)
+@test "scp copies in again over a guest workspace that holds read-only files" {
+    export STUB_SCP_COPY=1
+    printf 'object\n' > "$GITHUB_WORKSPACE/object"; chmod 444 "$GITHUB_WORKSPACE/object"
+    MVM_SYNC=scp run sync_ in
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run grep -F "mavericks:$GITHUB_WORKSPACE/" "$STUB_LOG"
+    [ "$status" -ne 0 ]
 }
 
 @test "copyback: false copies nothing back" {

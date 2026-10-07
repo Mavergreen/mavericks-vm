@@ -1,9 +1,9 @@
 #!/bin/bash
 printf "scp %s\n" "$*" >> "$STUB_LOG"
-# STUB_GUEST_ROOT: copy for real, the guest's "mavericks:/path" being $STUB_GUEST_ROOT/path, and
-# into existing files in place, as scp does (it opens each one for writing, so a read-only one
-# refuses). Only ever paths under the test's own directories.
-[ -n "${STUB_GUEST_ROOT:-}" ] || exit 0
+# STUB_SCP_COPY: copy for real, the guest's "mavericks:/path" being $STUB_GUEST_ROOT/path (the
+# guest being this machine when that is empty), and into existing files in place, as scp does: it
+# opens each one for writing, so a read-only one refuses. Only ever paths the test made.
+[ -n "${STUB_SCP_COPY:-}" ] || exit 0
 args=()
 for a in "$@"; do case "$a" in -F) skip=1 ;; -*) ;; *) if [ -n "${skip:-}" ]; then skip=; else args+=("${a/#mavericks:/$STUB_GUEST_ROOT}"); fi ;; esac; done
 cp -r "${args[0]}" "${args[1]}"

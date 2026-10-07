@@ -23,7 +23,12 @@ if [ "$1" = in ]; then
   case "${MVM_SYNC:-rsync}" in
     no) ;;
     rsync) rsync -a --delete -e "ssh -F $cfg" "$ws/" "mavericks:$ws/" ;;
-    scp) scp -F "$cfg" -r -q "$ws/." "mavericks:$ws/" ;;
+    # spec: tests/run.bats -- a custom-shell step syncs in again over the guest's copy, whose git
+    #       objects are read-only, and scp writes into existing files in place; so it lands in an
+    #       empty directory, and the guest's cp -f, which replaces a file it cannot open, copies on
+    scp) gstage="$(ssh_ "mktemp -d /tmp/mavericks-vm-sync.XXXXXX")"
+         scp -F "$cfg" -r -q "$ws/." "mavericks:$gstage/"
+         ssh_ "cp -Rf $(printf '%q' "$gstage")/. $wsq/ && find $(printf '%q' "$gstage") -delete" ;;
     # platform: 10.9's bsdtar reads pax, which carries names longer than ustar's 100 bytes
     tar) tar -C "$ws" --format=pax -cf - . | ssh_ "tar -C $wsq -xf -" ;;
   esac

@@ -36,4 +36,8 @@ fi
 box="$(ls "$tpl"/output/*.box)"
 mkdir -p "$out"
 tar -xzf "$box" -C "$out"
+# spec: tests/build.bats -- the guest leaves the disk when the step ends: packer's output (the box,
+#       and the image it was made from) goes as soon as the box is unpacked into <dir>, which
+#       main.sh's own cleanup covers
+find "$work" -mindepth 1 -delete
 echo "build.sh: built the guest with packer-plugin-macosx $pin"

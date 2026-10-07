@@ -107,6 +107,7 @@ if [ -n "${MVM_PREPARE:-}" ] && [ "$prepared_hit" = false ]; then
   if [ -n "$pkey" ]; then
     # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "The cache" --
     #       cache-after-prepare is a second encrypted image under the prepared key
+    step space.sh prepare || exit 1
     step snapshot.sh "$box" "$data/prepared" || exit 1
     step image.sh push "$pkey" "$data/prepared" || exit 1
     pushed "$pkey"

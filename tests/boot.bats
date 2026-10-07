@@ -108,4 +108,9 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     [[ "$output" == *"$MVM_DATA_DIR"* ]] || false
     MVM_SPACE_AVAILABLE_KIB=$((100*1024*1024)) run bash "$REPO/scripts/space.sh" miss
     [ "$status" -eq 0 ]
+    # spec: cache-after-prepare's snapshot writes a whole new image and encrypts it, which no check
+    #       covered (final review, I5)
+    MVM_SPACE_AVAILABLE_KIB=1048576 run bash "$REPO/scripts/space.sh" prepare
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"prepare"* ]] || false
 }

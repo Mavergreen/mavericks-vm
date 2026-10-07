@@ -52,3 +52,14 @@ build() { bash "$REPO/scripts/build.sh" "$@"; }
     [[ "$output" == *"the host check refused"* ]] || false
     [[ "$output" != *"packer line 1"$'\n'* ]] || false
 }
+
+# spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Safety" (in packer-plugin-macosx)
+#       -- the decrypted guest leaves the disk when the step ends; a miss left packer's own output,
+#       the box and the image it was made from, under data-dir/build (final review, I5)
+@test "once the box is unpacked, packer's output is gone from data-dir" {
+    run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ -f "$BATS_TEST_TMPDIR/out/box_0.img" ]
+    run find "$MVM_DATA_DIR/build" -name '*.box' -o -name 'box_0.img' -o -name 'output*'
+    [ -z "$output" ] || { echo "left behind: $output"; false; }
+}

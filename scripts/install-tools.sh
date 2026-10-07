@@ -18,13 +18,34 @@ packer_sha256=af38a9e93e4ed1b9ca68206ae969c64c300c82a3dde46a780dfa629f0867f651
 dir="${MVM_TOOLS_DIR:-${RUNNER_TEMP:-/tmp}/mavericks-vm-tools}"
 mkdir -p "$dir/bin"
 
+# spec: tests/safety.bats -- apt's output went to /dev/null and nothing here had a time limit, so
+#       a stalled mirror or connection hung a job for 79 minutes without a word (Mavergreen/openssh
+#       Actions run 37672419741). Each step says what it is, runs under a limit, and on failure or
+#       timeout shows what it printed.
+limit="${MVM_INSTALL_TIMEOUT:-600}"
+apt_opts=(-o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+step() {  # $1 = what it is, then the command
+  local what="$1" out rc=0; shift
+  echo "install-tools: $what"
+  out="$(timeout "$limit" "$@" 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  if [ "$rc" -eq 124 ]; then
+    echo "::error title=mavericks-vm::$what did not finish in ${limit}s; what it printed:"
+  else
+    echo "::error title=mavericks-vm::$what failed (exit $rc); what it printed:"
+  fi
+  printf '%s\n' "$out"
+  exit 1
+}
+
 if [ -z "${MVM_SKIP_APT:-}" ]; then
-  sudo apt-get update -qq
+  step "apt-get update" sudo apt-get "${apt_opts[@]}" update -qq
   # platform: what packer-plugin-macosx builds with beyond the runner image -- nasm, iasl and
   #           uuid.h for OpenCore and OVMF, dmg2img and mkfs.hfsplus for the media, busybox for
   #           its microVM (seen missing 2026-10-06, this repo's Actions runs 37490378092 and 37499515340)
-  sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils zstd rsync unzip \
-    nasm acpica-tools uuid-dev dmg2img hfsprogs busybox-static > /dev/null
+  step "apt-get install of QEMU and the plugin's build tools" \
+    sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends qemu-system-x86 qemu-utils \
+    zstd rsync unzip nasm acpica-tools uuid-dev dmg2img hfsprogs busybox-static
   # platform: GitHub's runner user is not in the kvm group; the device is root-only by default
   sudo chmod 666 /dev/kvm
   # platform: a cpu-model of Nehalem or later makes 10.9's kernel read MSR_FLEX_RATIO (0x194) at
@@ -39,11 +60,12 @@ if [ -z "${MVM_SKIP_APT:-}" ]; then
   # platform: and loads hfsplus into it, which Ubuntu's Azure kernel ships only in its extra
   #           modules; the plugin takes a module it cannot find to be built in, so without these
   #           its microVM fails later, mounting the installer (Actions runs 37507097828, 37508429892)
-  sudo apt-get install -y -qq --no-install-recommends "linux-modules-extra-$(uname -r)" > /dev/null
+  step "apt-get install of linux-modules-extra-$(uname -r)" \
+    sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends "linux-modules-extra-$(uname -r)"
 fi
 
 fetch() {  # $1 = url, $2 = sha256, $3 = file
-  curl -fsSL --retry 3 -o "$dir/$3" "$1"
+  step "download of $3" curl -fsSL --connect-timeout 20 --max-time 300 --retry 3 -o "$dir/$3" "$1"
   got="$(sha256sum "$dir/$3" | cut -d' ' -f1)"
   [ "$got" = "$2" ] || { echo "::error title=mavericks-vm::$3 has sha256 $got, not the pinned $2"; exit 1; }
 }

@@ -83,12 +83,12 @@ PY
     printf 'not the release' > "$BATS_TEST_TMPDIR/bad.tgz"
     PATH="$fake:$PATH" STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/bad.tgz" MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" \
         run bash "$REPO/scripts/install-tools.sh"
-    install="$(grep '^sudo apt-get install' "$BATS_TEST_TMPDIR/sudo.log" | tr '\n' ' ')"
+    install="$(grep '^sudo apt-get .* install ' "$BATS_TEST_TMPDIR/sudo.log" | tr '\n' ' ')"
     for pkg in nasm acpica-tools uuid-dev dmg2img hfsprogs busybox-static; do
         [[ " $install " == *" $pkg "* ]] || { echo "not installed: $pkg"; false; }
     done
     grep -qxF "sudo chmod 644 /boot/vmlinuz-$(uname -r)" "$BATS_TEST_TMPDIR/sudo.log"
-    grep -q "^sudo apt-get install .*linux-modules-extra-$(uname -r)" "$BATS_TEST_TMPDIR/sudo.log"
+    grep -q "^sudo apt-get .* install .*linux-modules-extra-$(uname -r)" "$BATS_TEST_TMPDIR/sudo.log"
     grep -qxF "sudo tee /sys/module/kvm/parameters/ignore_msrs" "$BATS_TEST_TMPDIR/sudo.log"
 }
 
@@ -123,4 +123,38 @@ print(names, steps[w].get("if"))
 sys.exit(0 if ok else 1)
 PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
+# spec: install-tools sent apt's output to /dev/null and gave apt and curl no time limit, so a
+#       stalled mirror or connection hung a job for 79 minutes without a word (Mavergreen/openssh
+#       Actions run 37672419741); each step now says what it is, and one that stalls is cut off,
+#       named, with what it printed
+@test "install-tools: a step that hangs is cut off within its limit, and named" {
+    fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
+    # This test's own sudo: logs, and hangs on apt-get update as a stalled mirror would.
+    printf '#!/bin/sh\nprintf "sudo %%s\\n" "$*" >> "%s/sudo.log"\ncase "$*" in *apt-get*update*) echo "Ign:1 http://azure.archive.ubuntu.com"; sleep 30 ;; esac\n' \
+        "$BATS_TEST_TMPDIR" > "$fake/sudo"
+    chmod +x "$fake/sudo"
+    start=$SECONDS
+    PATH="$fake:$PATH" MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" MVM_INSTALL_TIMEOUT=2 \
+        run bash "$REPO/scripts/install-tools.sh"
+    [ "$status" -ne 0 ]
+    [ $((SECONDS - start)) -le 8 ] || { echo "took $((SECONDS - start))s"; false; }
+    [[ "$output" == *"apt-get update"* ]] || false
+    [[ "$output" == *"2s"* ]] || false
+    [[ "$output" == *"Ign:1 http://azure.archive.ubuntu.com"* ]] || false
+}
+
+@test "install-tools: apt waits for its lock and its mirrors only so long, and curl too" {
+    fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
+    printf '#!/bin/sh\nprintf "sudo %%s\\n" "$*" >> "%s/sudo.log"\n' "$BATS_TEST_TMPDIR" > "$fake/sudo"
+    chmod +x "$fake/sudo"
+    printf 'not the release' > "$BATS_TEST_TMPDIR/bad.tgz"
+    PATH="$fake:$PATH" STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/bad.tgz" MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" \
+        run bash "$REPO/scripts/install-tools.sh"
+    while read -r line; do
+        [[ "$line" == *"-o DPkg::Lock::Timeout="* && "$line" == *"-o Acquire::http::Timeout="* ]] \
+            || { echo "unbounded: $line"; false; }
+    done < <(grep '^sudo apt-get' "$BATS_TEST_TMPDIR/sudo.log")
+    grep -q '^curl-args .*--connect-timeout [0-9]* .*--max-time [0-9]*' "$STUB_LOG"
 }

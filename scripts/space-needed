@@ -1,3 +1,7 @@
+# GiB a step needs free in data-dir, checked before it starts (space.sh). Measured 2026-10-07 on
+# GitHub's ubuntu-latest runners (85-86 GiB free), Actions run 37653472664, with
+# packer-plugin-macosx v0.20261005.4: a hit peaked at 13-14 GiB, a cold build at 36 GiB (shared
+# registry) and 37 GiB (repo cache). prepare is unmeasured: no self-test job caches after prepare.
 hit 20
 miss 45
 prepare 20

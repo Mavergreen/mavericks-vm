@@ -98,3 +98,28 @@ sys.exit(1 if bad else 0)
 PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
+
+# spec: packer-plugin-macosx docs/decisions/0009, "The instruction-set levels" -- a guest told
+#       "no AVX" never turns XSAVE on, so a none row whose 10.9 reports OSXSAVE is not none
+@test "a level with no AVX fails a guest whose 10.9 has turned XSAVE on" {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    stubs="$BATS_TEST_TMPDIR/bin"; mkdir -p "$stubs"
+    printf '#!/bin/sh\necho "FPU SSE4.2 XSAVE OSXSAVE VMM"; echo ""\n' > "$stubs/sysctl"
+    printf '#!/bin/sh\ncase "$2" in avx|avx2|fma) kill -ILL $$ ;; esac\n' > "$stubs/python"
+    chmod +x "$stubs"/*
+    python3 - "$REPO/.github/workflows/self-test.yml" "$BATS_TEST_TMPDIR/none.sh" <<'PY'
+import sys, yaml
+guest = yaml.safe_load(open(sys.argv[1]))["jobs"]["guest"]
+row = [x for x in guest["strategy"]["matrix"]["include"] if x.get("cpu-isa") == "none"][0]
+script = [s for s in guest["steps"] if s.get("uses") == "./"][0]["with"]["run"]
+lines = script.split("\n")
+start = next(i for i, l in enumerate(lines) if l.startswith("words="))
+part = "\n".join(lines[start:])
+part = part.replace("${{ matrix.has }}", row.get("has", "")).replace("${{ matrix.faults }}", row.get("faults", ""))
+part = part[:part.index("test \"$(pwd)\"")] if "test \"$(pwd)\"" in part else part
+open(sys.argv[2], "w").write(part)
+PY
+    PATH="$stubs:$PATH" run sh "$BATS_TEST_TMPDIR/none.sh"
+    [ "$status" -ne 0 ] || { echo "the none row passed a guest reporting OSXSAVE"; false; }
+    [[ "$output" == *OSXSAVE* ]] || { echo "the failure does not name OSXSAVE: $output"; false; }
+}

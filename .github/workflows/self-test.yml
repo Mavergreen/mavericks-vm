@@ -102,7 +102,9 @@ jobs:
               case "$words" in *" $t "*) got=yes ;; *) got=no ;; esac
               [ "$want" = "$got" ] || { echo "10.9 reports $t: $got, want $want"; exit 1; }
             done
-            [ -z '${{ matrix.has }}' ] || case "$words" in *" OSXSAVE "*) ;; *) echo "10.9 has not enabled XSAVE"; exit 1 ;; esac
+            case "$words" in *" OSXSAVE "*) xsave=yes ;; *) xsave=no ;; esac
+            want=yes; [ -n '${{ matrix.has }}' ] || want=no
+            [ "$xsave" = "$want" ] || { echo "10.9 reports OSXSAVE: $xsave, want $want"; exit 1; }
             for n in ${{ matrix.has }}; do python tests/isa-probe.py $n || { echo "$n did not run"; exit 1; }; done
             for n in ${{ matrix.faults }}; do
               s=0; python tests/isa-probe.py $n 2> /dev/null || s=$?

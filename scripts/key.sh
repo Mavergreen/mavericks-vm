@@ -1,8 +1,8 @@
 #!/bin/bash
 # platform: GitHub's Linux runners only (bash, GNU coreutils) -- this Action runs nowhere else
 #   usage: key.sh [--prepared]
-#          env in:  MVM_ROOT (default: this repo); for --prepared, MVM_PREPARE and
-#                   MVM_CACHE_AFTER_PREPARE_SUFFIX
+#          env in:  MVM_ROOT (default: this repo); for --prepared, MVM_PREPARE,
+#                   MVM_CACHE_AFTER_PREPARE_SUFFIX and MVM_CPU_MODEL
 #          out:     the cache key, 64 hex digits
 set -euo pipefail
 
@@ -23,5 +23,7 @@ recipe="$(tr -d '[:space:]' < "$root/scripts/guest-recipe" 2>/dev/null || true)"
   if [ "${1:-}" = --prepared ]; then
     printf 'prepare=%s\n' "$(printf '%s' "${MVM_PREPARE:-}" | sha256sum | cut -d' ' -f1)"
     printf 'suffix=%s\n' "${MVM_CACHE_AFTER_PREPARE_SUFFIX:-}"
+    # spec: tests/key.bats -- prepare ran on this guest CPU, and a build in it may have probed it
+    printf 'cpu-model=%s\n' "${MVM_CPU_MODEL:-}"
   fi
 } | sha256sum | cut -d' ' -f1

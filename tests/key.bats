@@ -62,6 +62,17 @@ key() { bash "$REPO/scripts/key.sh" "$@"; }
     [ "$output" = "$p1" ]
 }
 
+# spec: packer-plugin-macosx docs/decisions/0009, "The instruction-set levels" -- a guest prepared
+#       on one CPU is not the guest another level would have prepared (a build in prepare may probe
+#       the CPU), so a matrix over cpu-isa with cache-after-prepare keeps one prepared guest per CPU
+@test "the prepared key moves with the guest CPU" {
+    MVM_PREPARE='echo one' MVM_CPU_MODEL='Penryn,vendor=GenuineIntel' run key --prepared
+    p1="$output"
+    MVM_PREPARE='echo one' MVM_CPU_MODEL='SandyBridge,vendor=GenuineIntel' run key --prepared
+    [ "$status" -eq 0 ]
+    [ "$output" != "$p1" ] || { echo "the prepared key ignores the cpu model"; false; }
+}
+
 @test "a missing or empty pin is an error, not a key" {
     : > "$ROOT/components/packer-plugin-macosx/version"
     run key

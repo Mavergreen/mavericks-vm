@@ -66,7 +66,7 @@ As with vmactions:
 | `mem` | `4096` | Guest memory, in MiB |
 | `cpu` | `2` | Guest CPU cores |
 | `nat` | | Port forwards, as `"host": "guest"` lines |
-| `cache-after-prepare` | `false` | Cache the guest again after `prepare`, so later runs skip it |
+| `cache-after-prepare` | `false` | Cache the guest again after `prepare`, so later runs with the same `prepare` and the same guest CPU skip it |
 | `cache-after-prepare-key-suffix` | | Change it to run `prepare` again and cache the result anew |
 | `custom-shell-name` | `mavericks` | Later steps can use `shell: mavericks {0}` |
 | `debug-on-error` | | On failure, print the guest's `system.log` |
@@ -79,7 +79,7 @@ As with vmactions:
 | `vnc-password` | | Accepted and ignored: there is no screen |
 | `token` | `${{ github.token }}` | Pulls and pushes Mavergreen's shared cache; needs `packages: write` |
 
-Plus three more:
+Plus four more:
 
 | Input | | |
 |---|---|---|

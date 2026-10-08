@@ -2,7 +2,7 @@ name: self-test
 
 # spec: docs/superpowers/plans/2026-10-06-mavericks-vm.md Task 12 (in packer-plugin-macosx) -- the
 #       Action used on itself against the real cached guest: one guest per job (each binds the same
-#       SSH port), so the sync modes and a CPU model are a matrix.
+#       SSH port), so the sync modes, the instruction-set levels and a CPU model are a matrix.
 # spec: tests/self_test_workflow.bats -- one warm job builds and pushes the shared guest if its key
 #       is cold, and the matrix waits for it: on a cold key, three jobs that each built and pushed
 #       the same guest raced (Actions run 37539764898), and the matrix should test the hit every
@@ -59,11 +59,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { sync: rsync, cpu-model: 'Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2', brand: Penryn }
+          # spec: tests/self_test_workflow.bats -- each instruction-set level, proven by what 10.9
+          #       reports (has) and by what runs (has) and faults (faults); under KVM a level
+          #       guarantees no more than that, so BMI on none and everything on avx go unchecked
+          - { sync: rsync, cpu-isa: none, brand: Penryn, has: '', faults: 'avx avx2 fma' }
           # spec: tests/inputs.bats -- Nehalem names no vendor, so the Action adds GenuineIntel's
-          - { sync: scp, cpu-model: Nehalem, brand: Nehalem }
-          - { sync: tar, cpu-model: 'Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2', brand: Penryn }
-          - { sync: rsync, cpu-model: 'Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2', brand: Penryn, cache-store: repo }
+          - { sync: scp, cpu-model: Nehalem, brand: Nehalem, has: '', faults: 'avx avx2 fma' }
+          - { sync: tar, cpu-isa: avx, brand: Sandy Bridge, has: avx, faults: '' }
+          - { sync: rsync, cpu-isa: avx2, brand: Ivy Bridge, has: 'avx avx2 fma bmi1 bmi2', faults: '' }
+          # neither cpu-isa nor cpu-model: the default, which is none
+          - { sync: rsync, brand: Penryn, cache-store: repo, has: '', faults: 'avx avx2 fma' }
     steps:
       - uses: actions/checkout@v7
       - name: Record the runner
@@ -81,7 +86,8 @@ jobs:
         with:
           image-key: ${{ secrets.MAVERICKS_VM_KEY }}
           sync: ${{ matrix.sync }}
-          cpu-model: ${{ matrix.cpu-model }}
+          cpu-isa: ${{ matrix.cpu-isa || '' }}
+          cpu-model: ${{ matrix.cpu-model || '' }}
           cache-store: ${{ matrix.cache-store || 'auto' }}
           debug-on-error: true
           envs: 'ROUNDTRIP'
@@ -89,6 +95,19 @@ jobs:
             test "$(sw_vers -productVersion)" = 10.9.5
             test "$(sw_vers -buildVersion)" = 13F1911
             sysctl -n machdep.cpu.brand_string | grep -q '${{ matrix.brand }}'
+            words=" $(sysctl -n machdep.cpu.features machdep.cpu.leaf7_features | tr '\n' ' ') "
+            for n in avx avx2 fma bmi1 bmi2; do
+              case $n in avx) t=AVX1.0 ;; avx2) t=AVX2 ;; fma) t=FMA ;; bmi1) t=BMI1 ;; bmi2) t=BMI2 ;; esac
+              case ' ${{ matrix.has }} ' in *" $n "*) want=yes ;; *) want=no ;; esac
+              case "$words" in *" $t "*) got=yes ;; *) got=no ;; esac
+              [ "$want" = "$got" ] || { echo "10.9 reports $t: $got, want $want"; exit 1; }
+            done
+            [ -z '${{ matrix.has }}' ] || case "$words" in *" OSXSAVE "*) ;; *) echo "10.9 has not enabled XSAVE"; exit 1 ;; esac
+            for n in ${{ matrix.has }}; do python tests/isa-probe.py $n || { echo "$n did not run"; exit 1; }; done
+            for n in ${{ matrix.faults }}; do
+              s=0; python tests/isa-probe.py $n 2> /dev/null || s=$?
+              [ $s -eq 132 ] || { echo "$n: status $s, want 132 (SIGILL)"; exit 1; }
+            done
             test "$(pwd)" = "$GITHUB_WORKSPACE" || test "$(pwd)" = '${{ github.workspace }}'
             printf '%s\n' "$ROUNDTRIP" > roundtrip.txt
         env:

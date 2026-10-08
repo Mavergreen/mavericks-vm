@@ -65,3 +65,36 @@ sys.exit(0 if ok else 1)
 PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
+
+# spec: packer-plugin-macosx docs/decisions/0009, "The instruction-set levels" -- each level is
+#       proven by what 10.9 reports and by the instructions that run and that fault. Under KVM a
+#       level guarantees only that: on an AVX2 runner BMI runs on none and everything runs on avx,
+#       so a row checks its level's promise and no more
+@test "the self-test proves none, avx and avx2 by what 10.9 reports and what runs" {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    run python3 - "$REPO/.github/workflows/self-test.yml" <<'PY'
+import sys, yaml
+guest = yaml.safe_load(open(sys.argv[1]))["jobs"]["guest"]
+rows = guest["strategy"]["matrix"]["include"]
+five = "avx avx2 fma bmi1 bmi2"
+want = {"none": ("", "avx avx2 fma"), "avx": ("avx", ""), "avx2": (five, "")}
+bad = []
+for isa, (has, faults) in want.items():
+    r = [x for x in rows if x.get("cpu-isa") == isa]
+    if len(r) != 1 or (r[0].get("has", ""), r[0].get("faults", "")) != (has, faults):
+        bad.append("cpu-isa %s: want has=%r faults=%r, got %r" % (isa, has, faults, r))
+default = [x for x in rows if "cpu-isa" not in x and "cpu-model" not in x]
+if len(default) != 1 or (default[0].get("has", ""), default[0].get("faults", "")) != want["none"]:
+    bad.append("want one row with neither input, proven as none: %r" % default)
+uses = [s for s in guest["steps"] if s.get("uses") == "./"][0]
+w, script = uses["with"], uses["with"]["run"]
+if "matrix.cpu-isa" not in w.get("cpu-isa", "") or "matrix.cpu-model" not in w.get("cpu-model", ""):
+    bad.append("the step does not pass cpu-isa and cpu-model from the matrix: %r" % w)
+for s in ("tests/isa-probe.py", "132", "machdep.cpu.leaf7_features", "OSXSAVE", "matrix.has", "matrix.faults"):
+    if s not in script:
+        bad.append("the run block lacks %r" % s)
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+PY
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+}

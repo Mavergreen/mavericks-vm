@@ -67,7 +67,7 @@ jobs:
           - { sync: scp, cpu-model: Nehalem, brand: Nehalem, has: '', faults: 'avx avx2 fma' }
           - { sync: tar, cpu-isa: avx, brand: Sandy Bridge, has: avx, faults: '' }
           - { sync: rsync, cpu-isa: avx2, brand: Ivy Bridge, has: 'avx avx2 fma bmi1 bmi2', faults: '' }
-          # neither cpu-isa nor cpu-model: the default, which is none
+          # spec: tests/self_test_workflow.bats -- neither cpu-isa nor cpu-model: the default, which is none
           - { sync: rsync, brand: Penryn, cache-store: repo, has: '', faults: 'avx avx2 fma' }
     steps:
       - uses: actions/checkout@v7

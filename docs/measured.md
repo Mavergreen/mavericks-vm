@@ -50,3 +50,25 @@ packer-plugin-macosx v0.20261005.4). `scripts/space-needed` checks for these, wi
 Without `vendor=GenuineIntel`, 10.9 hangs on AMD at OpenCore's "Loading kernel cache file" (run
 37524541544). Without `ignore_msrs`, Nehalem and later loop on a fault reading `MSR_FLEX_RATIO`
 (0x194), on both vendors (run 37539764898; packer-plugin-macosx `docs/decisions/0009`).
+
+## What each `cpu-isa` level proves
+
+Each level was proven on 2026-10-08 by what 10.9 reports and by the
+instructions that run and that fault (`tests/isa-probe.py`). Every job
+below passed.
+
+| `cpu-isa` | Intel runner | AMD runner |
+|---|---|---|
+| `none` (and the default) | Xeon Platinum 8370C: run 37836734837 attempt 3 | release run 37833815882; run 37836734837 |
+| `avx` | Xeon Platinum 8370C: run 37836734837 attempt 3, job 113525776093 | EPYC 9V74: release run 37833815882; EPYC 7763 and 9V74: run 37836734837 attempts 1, 2, 4 and 6 |
+| `avx2` | Xeon Platinum 8573C: run 37836734837 attempt 3, job 113525776062 | EPYC 7763: release run 37833815882 (second attempt); EPYC 7763 and 9V45: run 37836734837 attempts 1, 2, 4 and 6 |
+
+Under KVM a level is what the guest is *told*. On these runners, which
+all have AVX2:
+- `avx` runs AVX2, FMA and BMI too.
+- `none` runs BMI, but faults on the AVX family.
+
+The self-test asserts only what each level guarantees. Two jobs that day
+failed before any guest booted, both because `apt-get
+install` of the runner's `linux-modules-extra` printed nothing for 600 s
+(run 37833815882 attempt 1; run 37836734837 attempt 5).

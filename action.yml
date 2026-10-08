@@ -4,7 +4,7 @@ author: Mavergreen
 
 # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md (in Mavergreen/packer-plugin-macosx)
 #       -- the inputs are vmactions freebsd-vm v1.5.9's, by name, meaning and default, plus
-#       image-key and cpu-model; tests/inputs.bats holds the table
+#       image-key, cpu-model and cpu-isa; tests/inputs.bats holds the table
 inputs:
   osname:
     description: The OS name. Only mavericks.
@@ -68,9 +68,12 @@ inputs:
     default: ${{ github.token }}
   image-key:
     description: An age identity (age-keygen) in a secret, which encrypts and decrypts the cached guest -- a repo's own, or Mavergreen's org secret MAVERICKS_VM_KEY
+  cpu-isa:
+    description: The guest CPU by the instructions it has -- none (no AVX; the default), avx (Sandy Bridge -- AVX, not AVX2, FMA or BMI) or avx2 (AVX2, FMA, BMI1 and BMI2 too); under KVM a level is what the guest is told, and the instructions above it still run on the runner's CPU; not with cpu-model
+    default: ''
   cpu-model:
-    description: The guest CPU model, as QEMU's -cpu; one that names no vendor gets vendor=GenuineIntel, which 10.9 needs on an AMD runner
-    default: Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2
+    description: The guest CPU model, as QEMU's -cpu, instead of cpu-isa; one that names no vendor gets vendor=GenuineIntel, which 10.9 needs on an AMD runner
+    default: ''
   cache-store:
     description: Where the encrypted guest is cached -- auto (shared for Mavergreen repos, else repo), shared (Mavergreen's private registry) or repo (this repo's own actions/cache)
     default: auto
@@ -92,6 +95,7 @@ runs:
         MVM_IN_MEM: ${{ inputs.mem }}
         MVM_IN_CPU: ${{ inputs.cpu }}
         MVM_IN_CPU_MODEL: ${{ inputs.cpu-model }}
+        MVM_IN_CPU_ISA: ${{ inputs.cpu-isa }}
         MVM_IN_SYNC: ${{ inputs.sync }}
         MVM_IN_COPYBACK: ${{ inputs.copyback }}
         MVM_IN_USESH: ${{ inputs.usesh }}

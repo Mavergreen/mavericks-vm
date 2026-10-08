@@ -46,11 +46,22 @@ esac
 safe() {  # $1 = input name, $2 = value: one argv word, no shell metacharacters
   case "$2" in ''|*[!A-Za-z0-9.,+=_:-]*) die "$1: '$2' may hold only letters, digits and . , + = _ : -" ;; esac
 }
-safe cpu-model "${MVM_IN_CPU_MODEL:-}"
+# spec: tests/inputs.bats; packer-plugin-macosx docs/decisions/0009, "The instruction-set levels"
+#       -- cpu-isa asks for the guest by what it can run, each level a line measured on this image;
+#       keep this table equal to 0009's. enforce makes QEMU refuse a runner that lacks a feature
+#       rather than boot a guest that quietly tests as a lower level
+cpu_isa="${MVM_IN_CPU_ISA:-}" cpu_model="${MVM_IN_CPU_MODEL:-}"
+[ -n "$cpu_isa" ] && [ -n "$cpu_model" ] && die "cpu-isa and cpu-model: set one, not both"
+[ -n "$cpu_model" ] || case "${cpu_isa:-none}" in
+  none) cpu_model="Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2" ;;
+  avx) cpu_model="SandyBridge,vendor=GenuineIntel,-x2apic,-tsc-deadline,enforce" ;;
+  avx2) cpu_model="IvyBridge,vendor=GenuineIntel,-x2apic,-tsc-deadline,+avx2,+fma,+bmi1,+bmi2,+movbe,+abm,enforce" ;;
+  *) die "cpu-isa: want none, avx or avx2 (got '$cpu_isa')" ;;
+esac
+safe cpu-model "$cpu_model"
 # spec: tests/inputs.bats -- a runner is AMD or Intel by chance, and 10.9 hangs on AMD unless the
 #       guest's CPU says GenuineIntel (packer-plugin-macosx docs/host-profile.md G2), so a cpu-model
 #       naming no vendor gets that one, right after its model name
-cpu_model="$MVM_IN_CPU_MODEL"
 case ",$cpu_model," in
   *,vendor=*) ;;
   *) model="${cpu_model%%,*}"; cpu_model="$model,vendor=GenuineIntel${cpu_model#"$model"}" ;;

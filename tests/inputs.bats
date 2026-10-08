@@ -2,7 +2,7 @@
 #
 # The input contract: vmactions freebsd-vm v1.5.9's inputs, by name, meaning
 # and default (docs/superpowers/specs/2026-10-06-mavericks-vm-design.md in
-# packer-plugin-macosx), plus image-key and cpu-model. scripts/inputs.sh
+# packer-plugin-macosx), plus image-key, cpu-model and cpu-isa. scripts/inputs.sh
 # validates and normalizes them into MVM_* lines for $GITHUB_ENV.
 
 setup() {
@@ -12,7 +12,7 @@ setup() {
     export GITHUB_ENV
     # What action.yml passes for a step with every input left at its default.
     export MVM_IN_OSNAME=mavericks MVM_IN_RELEASE=10.9 MVM_IN_ARCH=x86_64 \
-        MVM_IN_MEM=4096 MVM_IN_CPU=2 MVM_IN_CPU_MODEL='Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2' \
+        MVM_IN_MEM=4096 MVM_IN_CPU=2 MVM_IN_CPU_MODEL= MVM_IN_CPU_ISA= \
         MVM_IN_SYNC=rsync MVM_IN_COPYBACK=true MVM_IN_USESH= MVM_IN_ENVS= MVM_IN_NAT= \
         MVM_IN_HAS_IMAGE_KEY=true MVM_IN_DISABLE_CACHE=false MVM_IN_CACHE_AFTER_PREPARE=false \
         MVM_IN_CACHE_AFTER_PREPARE_KEY_SUFFIX= MVM_IN_CUSTOM_SHELL_NAME=mavericks \
@@ -33,7 +33,7 @@ want = {
     "disable-cache": "false", "cache-after-prepare": "false",
     "cache-after-prepare-key-suffix": "", "debug-on-error": "", "vnc-password": "",
     "custom-shell-name": "mavericks", "token": "${{ github.token }}",
-    "image-key": None, "cpu-model": "Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2", "cache-store": "auto",
+    "image-key": None, "cpu-model": "", "cpu-isa": "", "cache-store": "auto",
 }
 got = yaml.safe_load(open(sys.argv[1]))["inputs"]
 bad = [f"{k}: want default {v!r}, got {got.get(k, {}).get('default')!r}" if k in got else f"{k}: missing"
@@ -142,6 +142,47 @@ EOF
     : > "$GITHUB_ENV"
     MVM_IN_CPU_MODEL='Haswell,vendor=AuthenticAMD' run inputs
     env_has 'MVM_CPU_MODEL=Haswell,vendor=AuthenticAMD'
+}
+
+# spec: packer-plugin-macosx docs/decisions/0009, "The instruction-set levels" -- each level is
+#       a measured -cpu line, and enforce makes QEMU refuse a host that lacks a feature rather
+#       than boot a guest that quietly tests as a lower level
+@test "cpu-isa none, avx and avx2 are the plugin's measured lines" {
+    MVM_IN_CPU_ISA=none run inputs
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    env_has 'MVM_CPU_MODEL=Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2'
+    : > "$GITHUB_ENV"
+    MVM_IN_CPU_ISA=avx run inputs
+    env_has 'MVM_CPU_MODEL=SandyBridge,vendor=GenuineIntel,-x2apic,-tsc-deadline,enforce'
+    : > "$GITHUB_ENV"
+    MVM_IN_CPU_ISA=avx2 run inputs
+    env_has 'MVM_CPU_MODEL=IvyBridge,vendor=GenuineIntel,-x2apic,-tsc-deadline,+avx2,+fma,+bmi1,+bmi2,+movbe,+abm,enforce'
+}
+
+@test "neither cpu-isa nor cpu-model is none's line" {
+    run inputs
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    env_has 'MVM_CPU_MODEL=Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2'
+}
+
+@test "today's default cpu-model, passed explicitly, still works" {
+    MVM_IN_CPU_MODEL='Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2' run inputs
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    env_has 'MVM_CPU_MODEL=Penryn,vendor=GenuineIntel,+ssse3,+sse4.1,+sse4.2'
+}
+
+@test "cpu-isa and cpu-model together are refused" {
+    MVM_IN_CPU_ISA=avx MVM_IN_CPU_MODEL=Nehalem run inputs
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"set one, not both"* ]]
+}
+
+@test "cpu-isa takes only none, avx or avx2" {
+    for v in AVX avx512 sse4 'avx '; do
+        MVM_IN_CPU_ISA="$v" run inputs
+        [ "$status" -ne 0 ] || { echo "cpu-isa='$v' accepted"; false; }
+        [[ "$output" == *"want none, avx or avx2"* ]] || { echo "$output"; false; }
+    done
 }
 
 @test "cpu-model and custom-shell-name carry no whitespace or shell metacharacters" {

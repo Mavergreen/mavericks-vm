@@ -20,20 +20,21 @@ setup() {
 @test "an unknown name is a usage error" {
     run python3 "$PROBE" sse9
     [ "$status" -eq 2 ]
-    [[ "$output" == *usage* ]]
+    [[ "$output" == *usage* ]] || false
 }
 
 @test "no name is a usage error" {
     run python3 "$PROBE"
     [ "$status" -eq 2 ]
-    [[ "$output" == *usage* ]]
+    [[ "$output" == *usage* ]] || false
 }
 
-# platform: the guest has only Python 2.7.5 (stock 10.9)
-@test "the probe is Python 2 as well as 3" {
+# platform: the guest has only Python 2.7.5 (stock 10.9), and few hosts have a python2
+@test "the probe has no Python-3-only syntax, and compiles under python2 where there is one" {
     [ -f "$PROBE" ]
     if command -v python2 > /dev/null; then
         python2 -m py_compile "$PROBE"
     fi
-    ! grep -nE '\bf"|\bf'"'"'|print [^(]|:=' "$PROBE"
+    run grep -nE '\bf"|\bf'"'"'|print [^(]|:=|\bnonlocal\b|\basync\b|\bawait\b|def [^(]*\([^)]*:[^)]*\)|\) *->|\(\*,|, *\*,|end *= *["'"'"']' "$PROBE"
+    [ "$status" -eq 1 ] || { echo "Python-3-only syntax: $output"; false; }
 }

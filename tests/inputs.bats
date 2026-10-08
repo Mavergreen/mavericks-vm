@@ -174,7 +174,7 @@ EOF
 @test "cpu-isa and cpu-model together are refused" {
     MVM_IN_CPU_ISA=avx MVM_IN_CPU_MODEL=Nehalem run inputs
     [ "$status" -ne 0 ]
-    [[ "$output" == *"set one, not both"* ]]
+    [[ "$output" == *"set one, not both"* ]] || false
 }
 
 @test "cpu-isa takes only none, avx or avx2" {

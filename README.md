@@ -84,7 +84,7 @@ Plus four more:
 | Input | | |
 |---|---|---|
 | `image-key` | required | Your key, the secret `MAVERICKS_VM_KEY`: it encrypts and decrypts your cached guest |
-| `cpu-isa` | `none` | The guest CPU by the instructions it has: `none` (no AVX), `avx` (Sandy Bridge: AVX, not AVX2, FMA or BMI) or `avx2` (AVX2, FMA, BMI1 and BMI2 too). Under KVM a level is what the guest is *told*: the instructions above it still run on the runner's CPU, except that `none` makes the AVX family fault. Not with `cpu-model` |
+| `cpu-isa` | `none` | The guest CPU by the instructions it has: `none` (no AVX), `avx` (Sandy Bridge: AVX, not AVX2, FMA or BMI) or `avx2` (AVX2, FMA, BMI1 and BMI2 too). Under KVM a level is what the guest is *told*: the instructions above it still run on the runner's CPU, except that `none` makes the AVX family fault. `avx` and `avx2` make QEMU refuse a runner that lacks one of their instructions; `none`, the default line unchanged, does not. Not with `cpu-model` |
 | `cpu-model` | | The guest CPU, as QEMU's `-cpu`, instead of `cpu-isa`. Without a `vendor=`, it gets `vendor=GenuineIntel`: on GitHub's AMD runners, 10.9 hangs without it |
 | `cache-store` | `auto` | `repo` (your repo's own cache), `shared` (Mavergreen's), or `auto` |
 

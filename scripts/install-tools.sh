@@ -1,7 +1,8 @@
 #!/bin/bash
 # platform: GitHub's Linux runners only (Ubuntu's apt, bash) -- this Action runs nowhere else
 #   usage: install-tools.sh
-#          env in:  MVM_TOOLS_DIR (default $RUNNER_TEMP/mavericks-vm-tools); MVM_SKIP_APT (tests)
+#          env in:  MVM_TOOLS_DIR (default $RUNNER_TEMP/mavericks-vm-tools); MVM_SKIP_APT (tests);
+#                   MVM_APT_TIMEOUT (180) and MVM_APT_TRIES (3), per apt step; MVM_INSTALL_TIMEOUT (600)
 #          out:     QEMU, zstd and rsync from apt; age, oras and packer, each its pinned release
 #                   checked by sha256, on the job's PATH
 set -euo pipefail
@@ -38,13 +39,36 @@ step() {  # $1 = what it is, then the command
   exit 1
 }
 
+# spec: tests/safety.bats -- apt's install of linux-modules-extra takes 12-22 s on GitHub's runners,
+#       and on 2026-10-08 twice printed nothing for the whole 600 s (runs 37833815882 and
+#       37836734837): a stall, not slowness. So an apt step has a shorter limit and more than one
+#       try, and dpkg finishes, between tries, whatever the killed attempt left half done.
+apt_limit="${MVM_APT_TIMEOUT:-180}"
+apt_tries="${MVM_APT_TRIES:-3}"
+apt_step() {  # $1 = what it is, then apt-get's arguments
+  local what="$1" out rc i why; shift
+  echo "install-tools: $what"
+  for ((i = 1; i <= apt_tries; i++)); do
+    rc=0
+    out="$(timeout "$apt_limit" sudo apt-get "${apt_opts[@]}" "$@" 2>&1)" || rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    if [ "$rc" -eq 124 ]; then why="did not finish in ${apt_limit}s"; else why="failed (exit $rc)"; fi
+    [ "$i" -lt "$apt_tries" ] || break
+    echo "install-tools: $what $why; trying again ($((i + 1)) of $apt_tries)"
+    timeout "$apt_limit" sudo dpkg --configure -a > /dev/null 2>&1 || true
+  done
+  echo "::error title=mavericks-vm::$what $why, $apt_tries times; what the last try printed:"
+  printf '%s\n' "$out"
+  exit 1
+}
+
 if [ -z "${MVM_SKIP_APT:-}" ]; then
-  step "apt-get update" sudo apt-get "${apt_opts[@]}" update -qq
+  apt_step "apt-get update" update -qq
   # platform: what packer-plugin-macosx builds with beyond the runner image -- nasm, iasl and
   #           uuid.h for OpenCore and OVMF, dmg2img and mkfs.hfsplus for the media, busybox for
   #           its microVM (seen missing 2026-10-06, this repo's Actions runs 37490378092 and 37499515340)
-  step "apt-get install of QEMU and the plugin's build tools" \
-    sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends qemu-system-x86 qemu-utils \
+  apt_step "apt-get install of QEMU and the plugin's build tools" \
+    install -y -qq --no-install-recommends qemu-system-x86 qemu-utils \
     zstd rsync unzip nasm acpica-tools uuid-dev dmg2img hfsprogs busybox-static
   # platform: GitHub's runner user is not in the kvm group; the device is root-only by default
   sudo chmod 666 /dev/kvm
@@ -60,8 +84,8 @@ if [ -z "${MVM_SKIP_APT:-}" ]; then
   # platform: and loads hfsplus into it, which Ubuntu's Azure kernel ships only in its extra
   #           modules; the plugin takes a module it cannot find to be built in, so without these
   #           its microVM fails later, mounting the installer (Actions runs 37507097828, 37508429892)
-  step "apt-get install of linux-modules-extra-$(uname -r)" \
-    sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends "linux-modules-extra-$(uname -r)"
+  apt_step "apt-get install of linux-modules-extra-$(uname -r)" \
+    install -y -qq --no-install-recommends "linux-modules-extra-$(uname -r)"
 fi
 
 fetch() {  # $1 = url, $2 = sha256, $3 = file

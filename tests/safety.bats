@@ -129,20 +129,41 @@ PY
 #       stalled mirror or connection hung a job for 79 minutes without a word (Mavergreen/openssh
 #       Actions run 37672419741); each step now says what it is, and one that stalls is cut off,
 #       named, with what it printed
-@test "install-tools: a step that hangs is cut off within its limit, and named" {
+@test "install-tools: an apt step that stalls every time is cut off, tried again, and named" {
     fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
     # This test's own sudo: logs, and hangs on apt-get update as a stalled mirror would.
     printf '#!/bin/sh\nprintf "sudo %%s\\n" "$*" >> "%s/sudo.log"\ncase "$*" in *apt-get*update*) echo "Ign:1 http://azure.archive.ubuntu.com"; sleep 30 ;; esac\n' \
         "$BATS_TEST_TMPDIR" > "$fake/sudo"
     chmod +x "$fake/sudo"
     start=$SECONDS
-    PATH="$fake:$PATH" MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" MVM_INSTALL_TIMEOUT=2 \
+    PATH="$fake:$PATH" MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" MVM_APT_TIMEOUT=2 MVM_APT_TRIES=2 \
         run bash "$REPO/scripts/install-tools.sh"
     [ "$status" -ne 0 ]
-    [ $((SECONDS - start)) -le 8 ] || { echo "took $((SECONDS - start))s"; false; }
-    [[ "$output" == *"apt-get update"* ]] || false
-    [[ "$output" == *"2s"* ]] || false
+    [ $((SECONDS - start)) -le 12 ] || { echo "took $((SECONDS - start))s"; false; }
+    [ "$(grep -c 'apt-get .*update' "$BATS_TEST_TMPDIR/sudo.log")" -eq 2 ] || { cat "$BATS_TEST_TMPDIR/sudo.log"; false; }
+    [[ "$output" == *"apt-get update did not finish in 2s, 2 times"* ]] || false
     [[ "$output" == *"Ign:1 http://azure.archive.ubuntu.com"* ]] || false
+}
+
+# spec: apt's install of linux-modules-extra takes 12-22 s on GitHub's runners, and on 2026-10-08
+#       twice printed nothing for the whole 600 s (runs 37833815882 and 37836734837), each
+#       costing a rerun of the job; a stall is cut off sooner and tried again, after dpkg finishes
+#       whatever the killed attempt left half done
+@test "install-tools: an apt install that stalls once is tried again, and the run goes on" {
+    fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
+    printf '#!/bin/sh\nprintf "sudo %%s\\n" "$*" >> "%s/sudo.log"\ncase "$*" in *install*linux-modules-extra*) [ -e "%s/stalled" ] || { : > "%s/stalled"; sleep 30; } ;; esac\n' \
+        "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" > "$fake/sudo"
+    chmod +x "$fake/sudo"
+    printf 'not the release' > "$BATS_TEST_TMPDIR/bad.tgz"
+    PATH="$fake:$PATH" STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/bad.tgz" MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" \
+        MVM_APT_TIMEOUT=2 run bash "$REPO/scripts/install-tools.sh"
+    log="$BATS_TEST_TMPDIR/sudo.log"
+    [ "$(grep -c 'install .*linux-modules-extra' "$log")" -eq 2 ] || { cat "$log"; false; }
+    # dpkg is set straight between the two attempts
+    sed -n '/linux-modules-extra/,$p' "$log" | sed -n 2p | grep -qF 'sudo dpkg --configure -a' || { cat "$log"; false; }
+    [[ "$output" == *"linux-modules-extra"*"did not finish in 2s; trying again (2 of 3)"* ]] || false
+    # and the run went on past apt
+    grep -qxF "sudo tee /sys/module/kvm/parameters/ignore_msrs" "$log" || { cat "$log"; false; }
 }
 
 @test "install-tools: apt waits for its lock and its mirrors only so long, and curl too" {

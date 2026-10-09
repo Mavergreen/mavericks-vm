@@ -71,4 +71,5 @@ all have AVX2:
 The self-test asserts only what each level guarantees. Two jobs that day
 failed before any guest booted, both because `apt-get
 install` of the runner's `linux-modules-extra` printed nothing for 600 s
-(run 37833815882 attempt 1; run 37836734837 attempt 5).
+(run 37833815882 attempt 1; run 37836734837 attempt 5). That step takes 12-22 s in every other
+job that day, so `install-tools.sh` now gives an apt step 180 s and three tries.

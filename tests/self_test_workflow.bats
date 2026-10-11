@@ -43,6 +43,32 @@ PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
 
+# spec: a cold step builds the base and then the Aqua Transport layer (run 38166708583 peaked at
+#       44 GiB with nothing to say which build used what), so each sample carries its time, and
+#       the report gives the peak's time and the use by minute, to lay against the step log's
+#       build.sh and layer.sh lines
+@test "the data disk's samples carry their time, and the report gives the use by minute" {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    run python3 - "$REPO/.github/workflows/self-test.yml" <<'PY'
+import sys, yaml
+jobs = yaml.safe_load(open(sys.argv[1]))["jobs"]
+bad = []
+for name, job in jobs.items():
+    steps = job.get("steps", [])
+    samplers = [s for s in steps if "free.kib" in str(s.get("run", "")) and "while" in str(s.get("run", ""))]
+    peaks = [s for s in steps if "peak" in str(s.get("name", "")).lower()]
+    if not samplers:
+        continue
+    ok = len(samplers) == 1 and "date -u" in samplers[0]["run"]
+    ok = ok and len(peaks) == 1 and " UTC" in peaks[0]["run"] and "::group::" in peaks[0]["run"]
+    if not ok:
+        bad.append(name)
+print(bad)
+sys.exit(1 if bad or not jobs else 0)
+PY
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
 # spec: every real defect found on 2026-10-07 (scp over read-only git objects, 10.9's find, the
 #       empty sync: no workspace, the SSH timeout) was caught by the self-test alone, while release
 #       had already moved @v1: a release now waits for the self-test of its own commit (final

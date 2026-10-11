@@ -26,12 +26,47 @@ layer() { bash "$REPO/scripts/layer.sh" "$@"; }
     grep -q "^packer build .*-var base_box=$BASE" "$STUB_LOG"
 }
 
-@test "the delta is made with the exact convert line, run in the layer dir" {
+# spec: convert -B copies every allocated cluster of a standalone source, so it would make the
+#       "delta" a whole ~6 GB image; an overlay over the full image, rebased in safe mode onto the
+#       base, keeps only the clusters that differ from the base
+@test "the delta is an overlay over the full image, rebased onto the base, run in the layer dir" {
     run layer "$BASE" "$LAYER"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    grep -qxF "qemu-img convert -O qcow2 -F qcow2 -B ../box/box_0.img $MVM_DATA_DIR/layer-full/box_0.img box_0.img" "$STUB_LOG"
-    grep -qxF "cwd $LAYER" "$STUB_LOG"
+    run grep -q '^qemu-img convert' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+    cr=$(grep -nxF "qemu-img create -q -f qcow2 -F qcow2 -b $MVM_DATA_DIR/layer-full/box_0.img box_0.img" "$STUB_LOG" | cut -d: -f1)
+    rb=$(grep -nxF "qemu-img rebase -f qcow2 -F qcow2 -b ../box/box_0.img box_0.img" "$STUB_LOG" | cut -d: -f1)
+    [ -n "$cr" ] && [ -n "$rb" ] && [ "$cr" -lt "$rb" ] || { cat "$STUB_LOG"; false; }
+    [ "$(sed -n "$((cr + 1))p" "$STUB_LOG")" = "cwd $LAYER" ] || { cat "$STUB_LOG"; false; }
+    [ "$(sed -n "$((rb + 1))p" "$STUB_LOG")" = "cwd $LAYER" ] || { cat "$STUB_LOG"; false; }
     [ -f "$LAYER/box_0.img" ]
+}
+
+# spec: the delta holds only what the layer changed, and reads as the whole layer guest. This test
+#       runs the real qemu-img, which only reads and writes small image files in this test's own
+#       $BATS_TEST_TMPDIR: it cannot reach the host. Every other command is still a stub.
+@test "with the real qemu-img, the delta is small, backed by ../box/box_0.img, and reads as the full image" {
+    [ -x /usr/bin/qemu-img ] || skip "no /usr/bin/qemu-img on this machine"
+    real="$BATS_TEST_TMPDIR/real"; mkdir -p "$real"; ln -s /usr/bin/qemu-img "$real/qemu-img"
+    raw="$BATS_TEST_TMPDIR/disk.raw"; full="$BATS_TEST_TMPDIR/full.qcow2"
+    head -c 16M /dev/urandom > "$raw"
+    rm "$BASE/box_0.img"
+    /usr/bin/qemu-img convert -q -f raw -O qcow2 "$raw" "$BASE/box_0.img"
+    # the layer build changes one 64 KiB cluster of the 256 the base holds
+    head -c 64K /dev/urandom | dd of="$raw" bs=64K seek=100 conv=notrunc status=none
+    /usr/bin/qemu-img convert -q -f raw -O qcow2 "$raw" "$full"
+    STUB_PACKER_DISK="$full" PATH="$real:$PATH" run layer "$BASE" "$LAYER"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run /usr/bin/qemu-img info --output=json "$LAYER/box_0.img"
+    [[ "$output" == *'"backing-filename": "../box/box_0.img"'* ]] || { echo "$output"; false; }
+    delta_size="$(stat -c %s "$LAYER/box_0.img")" full_size="$(stat -c %s "$full")"
+    echo "delta $delta_size bytes, full $full_size bytes" >&3
+    [ "$delta_size" -lt "$((full_size / 8))" ] || { echo "delta $delta_size bytes, full $full_size bytes"; false; }
+    # the full image is gone; the delta reads through its backing file, the base
+    [ ! -e "$MVM_DATA_DIR/layer-full" ]
+    run /usr/bin/qemu-img compare "$LAYER/box_0.img" "$full"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [[ "$output" == *"Images are identical"* ]] || false
 }
 
 # spec: a delta is bound to the bytes of the image under it; the ids say which image that is
@@ -90,7 +125,9 @@ base_state() { (cd "$BASE" && find . -printf '%p %y %s %m %T@\n' | sort; find . 
     mkdir -p "$MVM_DATA_DIR/layer-full"; printf stale > "$MVM_DATA_DIR/layer-full/stale.img"
     cat > "$BATS_TEST_TMPDIR/qemu-img" <<'X'
 #!/bin/bash
-ls -A "$(dirname "$8")" > "$LISTING"
+[ "$1" = create ] || exit 0
+while [ "$1" != -b ]; do shift; done
+ls -A "$(dirname "$2")" > "$LISTING"
 exit 0
 X
     chmod +x "$BATS_TEST_TMPDIR/qemu-img"
@@ -119,7 +156,22 @@ X
     chmod +x "$BATS_TEST_TMPDIR/qemu-img"
     PATH="$BATS_TEST_TMPDIR:$PATH" run layer "$BASE" "$LAYER"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"::error title=mavericks-vm::building the layer image: writing the delta over the base failed"* ]] || false
+    [[ "$output" == *"::error title=mavericks-vm::building the layer image: making the overlay over the full image failed"* ]] || false
+    [ ! -e "$MVM_DATA_DIR/layer-full" ]
+    [ ! -e "$LAYER" ]
+}
+
+@test "a failed rebase exits 1 naming the layer and the step, and leaves neither the full image nor a layer dir" {
+    cat > "$BATS_TEST_TMPDIR/qemu-img" <<'X'
+#!/bin/bash
+[ "$1" != rebase ] || exit 1
+touch "${!#}"
+X
+    chmod +x "$BATS_TEST_TMPDIR/qemu-img"
+    PATH="$BATS_TEST_TMPDIR:$PATH" run layer "$BASE" "$LAYER"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error title=mavericks-vm::building the layer image: rebasing the delta onto the base failed"* ]] || false
+    [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$output"; false; }
     [ ! -e "$MVM_DATA_DIR/layer-full" ]
     [ ! -e "$LAYER" ]
 }

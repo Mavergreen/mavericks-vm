@@ -68,9 +68,16 @@ rm -rf "$full" || fail "removing an earlier layer-full failed"
 bash "$here/build.sh" mavericks-aquatransport "$full" "$base" || fail
 
 mkdir -p "$layer" || fail "making $layer failed"
-# spec: tests/layer.bats -- run in the layer dir so the relative backing file is stored as written
-(cd "$layer" && qemu-img convert -O qcow2 -F qcow2 -B ../box/box_0.img "$full/box_0.img" box_0.img) \
-  || fail "writing the delta over the base failed"
+# spec: tests/layer.bats -- the delta holds only the clusters the layer build changed: an overlay
+#       over the full image, rebased in safe mode onto the base, which writes into the overlay each
+#       cluster where the full image and the base differ (convert -B would copy every allocated
+#       cluster of the standalone full image, a whole ~6 GB). Both run in the layer dir so the
+#       relative backing file resolves and is stored as written; afterwards the delta no longer
+#       refers to the full image, which goes
+(cd "$layer" && qemu-img create -q -f qcow2 -F qcow2 -b "$full/box_0.img" box_0.img) \
+  || fail "making the overlay over the full image failed"
+(cd "$layer" && qemu-img rebase -f qcow2 -F qcow2 -b ../box/box_0.img box_0.img) \
+  || fail "rebasing the delta onto the base failed"
 for f in OVMF_CODE.fd OVMF_VARS.fd opencore.img; do
   cp "$full/$f" "$layer/$f" \
     || fail "copying $f failed"

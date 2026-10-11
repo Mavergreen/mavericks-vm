@@ -1,6 +1,7 @@
 #!/bin/bash
 # A stand-in packer: records argv in $STUB_LOG; `build` writes a fake Vagrant box where the
-# Mavericks template would, or fails when STUB_PACKER_FAIL is set.
+# Mavericks template would (its disk a copy of $STUB_PACKER_DISK, when that is set), or fails when
+# STUB_PACKER_FAIL is set.
 printf 'packer %s\n' "$*" >> "$STUB_LOG"
 printf 'packer-token %s %s\n' "$1" "${PACKER_GITHUB_API_TOKEN:+set}" >> "$STUB_LOG"
 case "$1" in
@@ -16,7 +17,9 @@ case "$1" in
     printf 'PACKER_CACHE_DIR=%s\n' "${PACKER_CACHE_DIR:-}" >> "$STUB_LOG"
     # the layer template's box is named for the layer, as the plugin's is
     case "$PWD" in *-aquatransport) name=aquatransport ;; *) name="" ;; esac
-    mkdir -p output s && printf disk > s/box_0.img && printf code > s/OVMF_CODE.fd \
+    mkdir -p output s || exit 1
+    if [ -n "${STUB_PACKER_DISK:-}" ]; then cp "$STUB_PACKER_DISK" s/box_0.img; else printf disk > s/box_0.img; fi || exit 1
+    printf code > s/OVMF_CODE.fd \
       && printf vars > s/OVMF_VARS.fd && printf oc > s/opencore.img && printf '{}' > s/metadata.json \
       && tar -C s -czf "output/mavericks-10.9.5${name:+-$name}-libvirt.box" . ;;
   *) exit 2 ;;

@@ -168,3 +168,63 @@ sys.exit(1 if bad else 0)
 PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
+
+# spec: every failure is bounded in time and names what failed -- a stalled handshake must not
+#       hang the job until GitHub's six-hour default; 10.9's curl (7.30) has both options
+@test "the guest's TLS fetches are time-bounded, and a failed fetch or a missing package exits 1 naming it" {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    stubs="$BATS_TEST_TMPDIR/bin"; mkdir -p "$stubs"
+    python3 - "$REPO/.github/workflows/self-test.yml" "$BATS_TEST_TMPDIR/checks.sh" <<'PY'
+import sys, yaml
+guest = yaml.safe_load(open(sys.argv[1]))["jobs"]["guest"]
+script = [s for s in guest["steps"] if s.get("uses") == "./"][0]["with"]["run"]
+lines = script.split("\n")
+a = next(i for i, l in enumerate(lines) if "/usr/bin/curl" in l)
+b = next(i for i, l in enumerate(lines) if "AquaTransport" in l)
+last = max(i for i, l in enumerate(lines) if l.strip())
+assert a < b < next(i for i, l in enumerate(lines) if "roundtrip.txt" in l), "checks must come before the block's end"
+open(sys.argv[2], "w").write("\n".join(lines[a:b + 1]) + "\n")
+PY
+    grep -q -- '--connect-timeout 20 --max-time 60' "$BATS_TEST_TMPDIR/checks.sh" || { echo "curl has no time bounds"; false; }
+    grep -q -- '-sS --connect-timeout 20 --max-time 60 -o /dev/null' "$BATS_TEST_TMPDIR/checks.sh" || false
+    ! grep -q -- ' -f' "$BATS_TEST_TMPDIR/checks.sh" || { echo "curl must not use -f"; false; }
+    printf '#!/bin/sh\n[ -z "$CURL_FAIL" ] || [ "$CURL_FAIL" != "$(eval echo \\${$#})" ] || exit 35\nexit 0\n' > "$stubs/curl"
+    printf '#!/bin/sh\n[ -z "$NO_PKG" ] || exit 0\necho Wowfunhappy.AquaTransport\n' > "$stubs/pkgutil"
+    chmod +x "$stubs"/*
+    # the script calls /usr/bin/curl by absolute path, so point it at the stub
+    sed "s#/usr/bin/curl#$stubs/curl#" "$BATS_TEST_TMPDIR/checks.sh" > "$BATS_TEST_TMPDIR/run.sh"
+    PATH="$stubs:$PATH" run bash "$BATS_TEST_TMPDIR/run.sh"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    CURL_FAIL=https://release-assets.githubusercontent.com/ PATH="$stubs:$PATH" run bash "$BATS_TEST_TMPDIR/run.sh"
+    [ "$status" -eq 1 ] || { echo "$output"; false; }
+    [[ "$output" == *"TLS to https://release-assets.githubusercontent.com/ failed"* ]] || { echo "$output"; false; }
+    NO_PKG=1 PATH="$stubs:$PATH" run bash "$BATS_TEST_TMPDIR/run.sh"
+    [ "$status" -eq 1 ] || { echo "$output"; false; }
+    [[ "$output" == *AquaTransport* ]] || { echo "$output"; false; }
+}
+
+# spec: the eviction filter decides what is deleted, so it is run, not just read
+@test "the eviction filter deletes old unrelated versions only: either key, no tags, and new ones stay" {
+    command -v jq > /dev/null || skip "jq is not installed"
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    python3 - "$REPO/.github/workflows/evict.yml" "$BATS_TEST_TMPDIR/filter.jq" <<'PY'
+import re, sys, yaml
+steps = yaml.safe_load(open(sys.argv[1]))["jobs"]["evict"]["steps"]
+run = [s for s in steps if "--jq" in s.get("run", "")][0]["run"]
+f = re.search(r'--jq "(.*)" \\', run).group(1).replace('\\"', '"')
+f = f.replace("$keep_base", "KB").replace("$keep_layer", "KL").replace("$cutoff", "2026-09-01T00:00:00Z")
+open(sys.argv[2], "w").write(f)
+PY
+    cat > "$BATS_TEST_TMPDIR/in.json" <<'JSON'
+[{"id":1,"created_at":"2026-01-01T00:00:00Z","metadata":{"container":{"tags":["KB"]}}},
+ {"id":2,"created_at":"2026-01-01T00:00:00Z","metadata":{"container":{"tags":["x","KL"]}}},
+ {"id":3,"created_at":"2026-01-01T00:00:00Z","metadata":{"container":{"tags":["old"]}}},
+ {"id":4,"created_at":"2026-01-01T00:00:00Z","metadata":{"container":{"tags":[]}}},
+ {"id":5,"created_at":"2026-01-01T00:00:00Z","metadata":{"container":{"tags":null}}},
+ {"id":6,"created_at":"2026-01-01T00:00:00Z","metadata":{"container":{}}},
+ {"id":7,"created_at":"2026-10-01T00:00:00Z","metadata":{"container":{"tags":["old"]}}}]
+JSON
+    run jq -r -f "$BATS_TEST_TMPDIR/filter.jq" "$BATS_TEST_TMPDIR/in.json"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(echo "$output" | paste -sd' ')" = "3 4 5 6" ] || { echo "deleted: $output"; false; }
+}

@@ -94,7 +94,7 @@ jobs:
           run: |
             test "$(sw_vers -productVersion)" = 10.9.5
             test "$(sw_vers -buildVersion)" = 13F1911
-            for u in https://github.com/ https://release-assets.githubusercontent.com/ https://downloads.claude.ai/claude-code-releases/latest; do /usr/bin/curl -sS -o /dev/null "$u" || { echo "TLS to $u failed"; exit 1; }; done
+            for u in https://github.com/ https://release-assets.githubusercontent.com/ https://downloads.claude.ai/claude-code-releases/latest; do /usr/bin/curl -sS --connect-timeout 20 --max-time 60 -o /dev/null "$u" || { echo "TLS to $u failed"; exit 1; }; done
             pkgutil --pkgs | grep -q '^Wowfunhappy\.AquaTransport$' || { echo "the Aqua Transport layer is not installed in the guest (no Wowfunhappy.AquaTransport package)"; exit 1; }
             sysctl -n machdep.cpu.brand_string | grep -q '${{ matrix.brand }}'
             words=" $(sysctl -n machdep.cpu.features machdep.cpu.leaf7_features | tr '\n' ' ') "

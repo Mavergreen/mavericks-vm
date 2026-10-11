@@ -2,12 +2,18 @@
 # platform: GitHub's Linux runners only (bash, GNU tar, zstd) -- this Action runs nowhere else
 #   usage: image.sh pull <key> <dir>    0: the guest is in <dir>; 3: no guest under <key>
 #          image.sh push <key> <dir>    0: pushed, or already there
+#          image.sh push --replace <key> <dir>    0: pushed, over whatever was under <key>
 #          env in:  MVM_IMAGE_KEY (an age identity), MVM_STORE (registry | file), MVM_BLOB_DIR (the
 #                   file store's directory: <key>.tar.zst.age), MVM_TOKEN, GITHUB_ACTOR,
 #                   MVM_REGISTRY, MVM_DATA_DIR
 set -euo pipefail
 
-usage() { echo "usage: image.sh pull|push <64-hex key> <dir>" >&2; exit 2; }
+usage() { echo "usage: image.sh pull|push [--replace] <64-hex key> <dir> (--replace: push only)" >&2; exit 2; }
+# spec: tests/image.bats -- a delta is bound to the bytes of the image under it, so main.sh pushes
+#       an image it rebuilt in place of a cached one it threw away with --replace: push-if-absent
+#       would keep the thrown-away one under the key
+replace=false
+if [ "${1:-}" = push ] && [ "${2:-}" = --replace ]; then replace=true; set -- push "${@:3}"; fi
 [ $# -eq 3 ] || usage
 cmd="$1"; key="$2"; dir="$3"
 case "$cmd" in pull|push) ;; *) usage ;; esac
@@ -79,14 +85,14 @@ if [ "$cmd" = pull ]; then
   find "$work/unpacked" -mindepth 1 -maxdepth 1 -exec mv -t "$dir" {} +
   echo "image.sh: pulled the cached guest $key"
 else
-  if exists; then echo "image.sh: a guest is already cached under $key; not pushing"; exit 0; fi
+  if [ "$replace" = false ] && exists; then echo "image.sh: a guest is already cached under $key; not pushing"; exit 0; fi
   recipient="$(printf '%s\n' "$MVM_IMAGE_KEY" | age-keygen -y)"
   tar -C "$dir" -cf - . | zstd -q -T0 -10 --long=27 | age -r "$recipient" -o "$work/box.tar.zst.age"
-  if exists; then echo "image.sh: a guest appeared under $key meanwhile; not pushing"; exit 0; fi
+  if [ "$replace" = false ] && exists; then echo "image.sh: a guest appeared under $key meanwhile; not pushing"; exit 0; fi
   if [ "$store" = file ]; then
     mkdir -p "$(dirname "$blob")" && mv "$work/box.tar.zst.age" "$blob"
   else
     (cd "$work" && tries oras push "$ref" "box.tar.zst.age:application/vnd.mavergreen.mavericks-vm.box.v1+age" > /dev/null)
   fi
-  echo "image.sh: pushed the cached guest $key"
+  if [ "$replace" = true ]; then echo "image.sh: replaced the cached guest $key"; else echo "image.sh: pushed the cached guest $key"; fi
 fi

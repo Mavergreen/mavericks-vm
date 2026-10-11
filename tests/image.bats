@@ -61,6 +61,38 @@ image() { bash "$REPO/scripts/image.sh" "$@"; }
     [ "$(cat "$STUB_REGISTRY/$K/blob")" = theirs ]
 }
 
+# spec: a delta is bound to the bytes of the image under it; when main.sh throws away a cached
+#       image (stale, or over a different image) and rebuilds it, push-if-absent would keep the
+#       stale one under the key, so the rebuilt one is pushed with --replace
+@test "push --replace overwrites a guest already under the key, without asking whether it is there" {
+    mkdir -p "$STUB_REGISTRY/$K"; printf 'theirs\n' > "$STUB_REGISTRY/$K/blob"
+    run image push --replace "$K" "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [[ "$output" == *"replaced"* ]] || false
+    run grep -q '^oras manifest fetch' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+    run image pull "$K" "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    diff -r "$BOX" "$BATS_TEST_TMPDIR/out"
+}
+
+@test "push --replace to a key nobody pushed pushes it" {
+    run image push --replace "$K" "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run image pull "$K" "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    diff -r "$BOX" "$BATS_TEST_TMPDIR/out"
+}
+
+@test "--replace is for push only, and still takes a key and a dir" {
+    run image pull --replace "$K" "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 2 ]
+    run image push --replace "$K"
+    [ "$status" -eq 2 ]
+    run image push "$K" "$BOX" --replace
+    [ "$status" -eq 2 ]
+}
+
 @test "neither the key nor the token reaches any command line or any output" {
     run image push "$K" "$BOX"
     run image pull "$K" "$BATS_TEST_TMPDIR/out"
@@ -146,6 +178,26 @@ image() { bash "$REPO/scripts/image.sh" "$@"; }
     [ ! -e "$MVM_BLOB_DIR/$K.tar.zst.age" ]
     run image push "$K" "$BOX"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run image pull "$K" "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    diff -r "$BOX" "$BATS_TEST_TMPDIR/out"
+}
+
+@test "file store: a push to a key that already has a blob is skipped, and says so" {
+    export MVM_STORE=file MVM_BLOB_DIR="$BATS_TEST_TMPDIR/blob"
+    mkdir -p "$MVM_BLOB_DIR"; printf 'theirs\n' > "$MVM_BLOB_DIR/$K.tar.zst.age"
+    run image push "$K" "$BOX"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already"* ]] || false
+    [ "$(cat "$MVM_BLOB_DIR/$K.tar.zst.age")" = theirs ]
+}
+
+@test "file store: push --replace writes over the blob already under the key" {
+    export MVM_STORE=file MVM_BLOB_DIR="$BATS_TEST_TMPDIR/blob"
+    mkdir -p "$MVM_BLOB_DIR"; printf 'theirs\n' > "$MVM_BLOB_DIR/$K.tar.zst.age"
+    run image push --replace "$K" "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [[ "$output" == *"replaced"* ]] || false
     run image pull "$K" "$BATS_TEST_TMPDIR/out"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     diff -r "$BOX" "$BATS_TEST_TMPDIR/out"

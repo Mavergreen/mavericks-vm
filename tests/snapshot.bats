@@ -41,6 +41,7 @@ setup() {
     run bash "$REPO/scripts/snapshot.sh" "$BOX" "$BATS_TEST_TMPDIR/prepared"
     kill %1 2>/dev/null
     [ "$status" -ne 0 ]
+    [[ "$output" == *"::error title=mavericks-vm::snapshotting the prepared image: the guest did not power off"* ]] || false
     run grep -q '^qemu-img convert' "$STUB_LOG"
     [ "$status" -ne 0 ]
 }
@@ -62,4 +63,26 @@ setup() {
     [[ "$output" == *"::error title=mavericks-vm::snapshotting the prepared image"*"image-id"* ]] || false
     run grep -q 'shutdown' "$STUB_LOG"
     [ "$status" -ne 0 ]
+}
+
+# spec: the delta is written from inside <out-dir>, so a relative data-dir would name an overlay
+#       that is not there (task 3 review, minor 6)
+@test "a relative data-dir is refused, by name, before the guest is shut down" {
+    cd "$BATS_TEST_TMPDIR"
+    MVM_DATA_DIR=data run bash "$REPO/scripts/snapshot.sh" "$BOX" "$BATS_TEST_TMPDIR/prepared"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error title=mavericks-vm::snapshotting the prepared image: data-dir must be an absolute path"* ]] || false
+    run grep -q 'shutdown' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
+# spec: one ::error per failure, naming the image and the step; snapshot.sh names its own, so
+#       main.sh does not, and a failure it did not foresee is still named once
+@test "a failure snapshot.sh does not foresee is named once" {
+    fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
+    printf '#!/bin/bash\nexit 1\n' > "$fake/qemu-img"; chmod +x "$fake/qemu-img"
+    PATH="$fake:$PATH" run bash "$REPO/scripts/snapshot.sh" "$BOX" "$BATS_TEST_TMPDIR/prepared"
+    [ "$status" -ne 0 ]
+    [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$output"; false; }
+    [[ "$output" == *"::error title=mavericks-vm::snapshotting the prepared image failed"* ]] || false
 }

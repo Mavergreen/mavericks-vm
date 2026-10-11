@@ -5,7 +5,8 @@
 #          Mavericks box, read and never written)
 #          env in:  MVM_DATA_DIR, MVM_CACHE_DIR
 #          out:     the guest's box contents (box_0.img, OVMF_CODE.fd, OVMF_VARS.fd, opencore.img,
-#                   ...) in <dir>; on failure, the end of packer's output and exit 1
+#                   ...) in <dir>; on failure, the end of packer's output and exit 1, in plain
+#                   lines: the caller (main.sh, layer.sh) names the image in the one ::error
 set -euo pipefail
 
 usage="usage: build.sh <template> <dir> [<base-dir>] (template: mavericks or mavericks-aquatransport)"
@@ -44,7 +45,7 @@ export PACKER_PLUGIN_PATH="$data/packer-plugins" PACKER_CACHE_DIR="$MVM_CACHE_DI
 quiet() {  # $@ = a packer command, run with the job's token; its output only if it fails
   local out
   if ! out="$(PACKER_GITHUB_API_TOKEN="${MVM_TOKEN:-}" "$@" 2>&1)"; then
-    echo "::error title=mavericks-vm::$* failed:"
+    echo "build.sh: $* failed:"
     printf '%s\n' "$out"
     return 1
   fi
@@ -54,7 +55,7 @@ quiet packer plugins install github.com/mavergreen/macosx "$pin"
 
 log="$work/packer-build.log"
 if ! (cd "$tpl" && packer build -var-file="$root/box.pkrvars.hcl" "${extra[@]}" .) > "$log" 2>&1; then
-  echo "::error title=mavericks-vm::building the guest ($template) with packer-plugin-macosx $pin failed; the end of packer's output:"
+  echo "build.sh: building the guest ($template) with packer-plugin-macosx $pin failed; the end of packer's output:"
   tail -n 40 "$log"
   exit 1
 fi

@@ -2,7 +2,8 @@
 # platform: GitHub's Linux runners only (bash, GNU df) -- this Action runs nowhere else
 #   usage: space.sh hit|miss|layer|prepare
 #          env in:  MVM_DATA_DIR; MVM_SPACE_AVAILABLE_KIB (tests only: instead of df)
-#          out:     exit 0, or an ::error:: naming data-dir, the room there and the room needed
+#          out:     exit 0, or the one ::error naming the image and the step the room is for,
+#                   data-dir, the room there and the room needed
 set -euo pipefail
 
 case "${1:-}" in hit|miss|layer|prepare) ;; *) echo "usage: space.sh hit|miss|layer|prepare" >&2; exit 2 ;; esac
@@ -12,8 +13,15 @@ mkdir -p "$dir"
 need_gib="$(sed -n "s/^$1 //p" "$root/scripts/space-needed")"
 avail_kib="${MVM_SPACE_AVAILABLE_KIB:-$(df -Pk "$dir" | awk 'NR == 2 { print $4 }')}"
 avail_gib=$((avail_kib / 1024 / 1024))
+# spec: tests/boot.bats -- each failure names its image and its step, here and nowhere else
+case "$1" in
+  hit) what="pulling the cached base, layer and prepared images" ;;
+  miss) what="building the base image" ;;
+  layer) what="building the layer image" ;;
+  prepare) what="snapshotting the prepared image" ;;
+esac
 # spec: tests/boot.bats -- refuse before starting, rather than fill the disk twenty minutes in
 if [ "$avail_gib" -lt "$need_gib" ]; then
-  echo "::error title=mavericks-vm::$dir has $avail_gib GiB free; a cache $1 needs $need_gib GiB more. Set data-dir to a larger volume, or use a larger runner."
+  echo "::error title=mavericks-vm::$what: $dir has $avail_gib GiB free and needs $need_gib GiB more (a cache $1). Set data-dir to a larger volume, or use a larger runner."
   exit 1
 fi

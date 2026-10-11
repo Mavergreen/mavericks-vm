@@ -6,19 +6,35 @@
 #                   <out-dir>/../layer
 #          out:     <out-dir> holding the running guest's disk as box_0.img, a qcow2 delta whose
 #                   backing file is the literal ../layer/box_0.img, <box-dir>'s firmware, image-id
-#                   (fresh: 32 hex digits) and backing-id (<box-dir>'s image-id); the guest powered off
+#                   (fresh: 32 hex digits) and backing-id (<box-dir>'s image-id); the guest powered off;
+#                   on failure, exit 1 after the one ::error naming the prepared image
 set -euo pipefail
 
 [ $# -eq 2 ] || { echo "usage: snapshot.sh <box-dir> <out-dir>" >&2; exit 2; }
 box="$1"; out="$2"
 data="${MVM_DATA_DIR:?snapshot.sh: MVM_DATA_DIR is unset}"
+# spec: tests/snapshot.bats -- one ::error per failure, naming the image and the step; main.sh adds
+#       none, so a failure not foreseen here is named on the way out
+step="snapshotting the prepared image"
+named=false
+err() {  # $1 = what went wrong; a workflow command is one line, so % CR LF are encoded
+  local m="${1//'%'/%25}"; m="${m//$'\r'/%0D}"; m="${m//$'\n'/%0A}"
+  named=true
+  echo "::error title=mavericks-vm::$step: $m"
+}
+unforeseen() { local rc=$?; [ "$rc" -eq 0 ] || [ "$named" = true ] || echo "::error title=mavericks-vm::$step failed"; }
+trap unforeseen EXIT
+
+# spec: tests/snapshot.bats -- the delta is written from inside <out-dir>, where a relative
+#       data-dir would name an overlay that is not there
+case "$data" in /*) ;; *) err "data-dir must be an absolute path (got $data)"; exit 1 ;; esac
 pid="$(cat "$data/qemu.pid")"
 
 # spec: tests/snapshot.bats -- a delta is bound to the bytes of the image under it: the prepared
 #       image records the layer's image-id; a layer without one is refused while the guest still runs
 layer_id="$(cat "$box/image-id" 2>/dev/null || true)"
 if ! [[ "$layer_id" =~ ^[0-9a-f]{32}$ ]]; then
-  echo "::error title=mavericks-vm::snapshotting the prepared image: the layer has no image-id in $box/image-id to bind it to"
+  err "the layer has no image-id in $box/image-id to bind it to"
   exit 1
 fi
 
@@ -27,7 +43,7 @@ ssh -F "$HOME/.ssh/config" mavericks 'sudo shutdown -h now' > /dev/null 2>&1 || 
 waited=0; limit="${MVM_SHUTDOWN_TIMEOUT:-180}"
 while kill -0 "$pid" 2>/dev/null; do
   if [ "$waited" -ge "$limit" ]; then
-    echo "::error title=mavericks-vm::the guest did not power off within ${limit}s; not caching a running disk"
+    err "the guest did not power off within ${limit}s; not caching a running disk"
     exit 1
   fi
   sleep 1; waited=$((waited + 1))

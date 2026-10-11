@@ -2,8 +2,10 @@
 # platform: GitHub's Linux runners only (bash, QEMU from apt, OpenSSH) -- this Action runs nowhere else
 #   usage: snapshot.sh <box-dir> <out-dir>
 #          env in:  MVM_DATA_DIR (holds overlay.qcow2 and qemu.pid); MVM_SHUTDOWN_TIMEOUT (default 180)
-#          out:     <out-dir> holding the running guest's disk, flattened, and <box-dir>'s firmware;
-#                   the guest powered off
+#          in:      <box-dir>, the layer guest that booted, which must be <out-dir>/../layer
+#          out:     <out-dir> holding the running guest's disk as box_0.img, a qcow2 delta whose
+#                   backing file is the literal ../layer/box_0.img, and <box-dir>'s firmware; the
+#                   guest powered off
 set -euo pipefail
 
 [ $# -eq 2 ] || { echo "usage: snapshot.sh <box-dir> <out-dir>" >&2; exit 2; }
@@ -23,6 +25,8 @@ while kill -0 "$pid" 2>/dev/null; do
 done
 
 mkdir -p "$out"
-qemu-img convert -O qcow2 "$data/overlay.qcow2" "$out/box_0.img"
+# spec: tests/snapshot.bats -- run in <out-dir> so the relative backing file is stored as written;
+#       it resolves because the prepared dir is the layer dir's sibling in data-dir
+(cd "$out" && qemu-img convert -O qcow2 -F qcow2 -B ../layer/box_0.img "$data/overlay.qcow2" box_0.img)
 for f in OVMF_CODE.fd OVMF_VARS.fd opencore.img; do cp "$box/$f" "$out/$f"; done
 echo "snapshot.sh: the prepared guest is in $out"

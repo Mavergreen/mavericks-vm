@@ -204,7 +204,7 @@ runs:
         key: mavericks-vm-layer-${{ steps.key.outputs.layer }}-${{ github.run_id }}-${{ github.run_attempt }}
 
     - name: Save the prepared image this run cached
-      if: always() && steps.main.outputs.cache-save-prepared == 'true'
+      if: always() && steps.main.outputs.cache-save-prepared == 'true' && steps.key.outputs.prepared != ''
       uses: actions/cache/save@v6.1.0
       with:
         path: ${{ env.MVM_BLOB_DIR }}/${{ steps.key.outputs.prepared }}.tar.zst.age

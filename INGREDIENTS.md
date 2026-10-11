@@ -9,7 +9,7 @@ here. The guest it boots is built by `Mavergreen/packer-plugin-macosx`, which is
 | Ingredient | Pinned in | Renovate | On a bump |
 |---|---|---|---|
 | the Action (own upstream) | `UPSTREAM_VERSION` (`1.0`), and the commit count | **untrackable**: nothing external releases it; it is this repo | every push to main cuts `v1.0.<count>` and then moves `@v1` |
-| `packer-plugin-macosx`: the plugin and its Mavericks template, which build the guest | `components/packer-plugin-macosx/version` | ✅ customManager, `github-releases` | a new cache key: the next consumer run (or the warmer) builds and pushes the new guest |
+| `packer-plugin-macosx`: the plugin, its Mavericks template and its Aqua Transport layer template, which build the guest | `components/packer-plugin-macosx/version` | ✅ customManager, `github-releases` | a new layer key (and a new base key only when the base recipe moved): the next consumer run (or the warmer) builds and pushes the layer, and the base too if it moved |
 | `age`, `oras`, `zstd`, QEMU, `packer` | installed on the runner at run time | **untrackable** for QEMU and `zstd` (the runner's apt: Ubuntu chooses the version); `age`, `oras` and `packer` are pinned where Task 6/7 install them | a pinned tool's bump is a repackage; none of them changes the cached guest |
 | shipyard's scripts and workflows | `Mavergreen/shipyard@v1` | ✅ github-actions manager tracks the tag | `@v1` is a moving tag: content changes without the pin changing, so nothing auto-repackages |
 

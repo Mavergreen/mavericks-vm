@@ -90,11 +90,25 @@ build_layer() {  # over the base in $box
   step layer.sh "$box" "$layer"; rc=$?
   case "$rc" in 0) ;; 1) exit 1 ;; *) die "building the layer image" ;; esac
 }
-push() {  # $1 = base, layer or prepared; $2 = its key; $3 = its dir; $4 = miss or stale
+# spec: tests/main.bats -- when another run cached its own image under a key first, this run's
+#       push is skipped (image.sh exits 4) and this run's image is not in the store; whatever this
+#       run made over it is bound to it, so it is not cached either (with --replace it would
+#       overwrite one made over the cached image). This run still boots its own whole chain.
+unstored=""
+push() {  # $1 = base, layer or prepared (pushed in that order); $2 = its key; $3 = its dir; $4 = miss or stale
+  if [ -n "$unstored" ]; then
+    echo "mavericks-vm: not caching the $1 image: it was made over this run's $unstored image, which another run's took the place of in the cache"
+    return
+  fi
   if [ "$4" = stale ]; then
     step image.sh push --replace "$2" "$3" || die "pushing the $1 image"
   else
-    step image.sh push "$2" "$3" || die "pushing the $1 image"
+    step image.sh push "$2" "$3"; rc=$?
+    case "$rc" in
+      0) ;;
+      4) unstored="$1"; return ;;
+      *) die "pushing the $1 image" ;;
+    esac
   fi
   pushed "$2"
 }

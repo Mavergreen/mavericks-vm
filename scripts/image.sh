@@ -1,8 +1,9 @@
 #!/bin/bash
 # platform: GitHub's Linux runners only (bash, GNU tar, zstd) -- this Action runs nowhere else
 #   usage: image.sh pull <key> <dir>    0: the guest is in <dir>; 3: no guest under <key>
-#          image.sh push <key> <dir>    0: pushed, or already there
-#          image.sh push --replace <key> <dir>    0: pushed, over whatever was under <key>
+#          image.sh push <key> <dir>    0: pushed; 4: not pushed, a guest (maybe another run's) is
+#                                       already under <key>
+#          image.sh push --replace <key> <dir>    0: pushed, over whatever was under <key>; never 4
 #          env in:  MVM_IMAGE_KEY (an age identity), MVM_STORE (registry | file), MVM_BLOB_DIR (the
 #                   file store's directory: <key>.tar.zst.age), MVM_TOKEN, GITHUB_ACTOR,
 #                   MVM_REGISTRY, MVM_DATA_DIR
@@ -85,10 +86,12 @@ if [ "$cmd" = pull ]; then
   find "$work/unpacked" -mindepth 1 -maxdepth 1 -exec mv -t "$dir" {} +
   echo "image.sh: pulled the cached guest $key"
 else
-  if [ "$replace" = false ] && exists; then echo "image.sh: a guest is already cached under $key; not pushing"; exit 0; fi
+  # spec: tests/image.bats -- a skipped push exits 4: the guest under <key> is not the one in <dir>,
+  #       so the caller caches nothing it made over the one in <dir>
+  if [ "$replace" = false ] && exists; then echo "image.sh: a guest is already cached under $key; not pushing"; exit 4; fi
   recipient="$(printf '%s\n' "$MVM_IMAGE_KEY" | age-keygen -y)"
   tar -C "$dir" -cf - . | zstd -q -T0 -10 --long=27 | age -r "$recipient" -o "$work/box.tar.zst.age"
-  if [ "$replace" = false ] && exists; then echo "image.sh: a guest appeared under $key meanwhile; not pushing"; exit 0; fi
+  if [ "$replace" = false ] && exists; then echo "image.sh: a guest appeared under $key meanwhile; not pushing"; exit 4; fi
   if [ "$store" = file ]; then
     mkdir -p "$(dirname "$blob")" && mv "$work/box.tar.zst.age" "$blob"
   else

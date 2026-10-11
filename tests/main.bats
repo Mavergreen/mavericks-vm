@@ -28,8 +28,13 @@ case "$f $1" in
     [ -d "$STORE/$2" ] || exit 3
     mkdir -p "$3" && cp -R "$STORE/$2/." "$3/" ;;
   "image.sh push")
-    if [ "$2" = --replace ]; then rm -rf "${STORE:?}/$3"; set -- push "$3" "$4"; fi
-    [ ! -d "$STORE/$2" ] || { echo "image.sh: already cached under $2; not pushing"; exit 0; }
+    if [ "$2" = --replace ]; then rm -rf "${STORE:?}/$3"; set -- push "$3" "$4"
+    # STUB_RACE=<key>: another run pushes its own image under <key> just before this push
+    elif [ "$2" = "${STUB_RACE:-}" ]; then
+      mkdir -p "$STORE/$2"; echo theirs > "$STORE/$2/box_0.img"
+      echo eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee > "$STORE/$2/image-id"; echo ffffffffffffffffffffffffffffffff > "$STORE/$2/backing-id"
+    fi
+    [ ! -d "$STORE/$2" ] || { echo "image.sh: already cached under $2; not pushing"; exit 4; }
     mkdir -p "$STORE/$2" && cp -R "$3/." "$STORE/$2/" ;;
   "build.sh "*) mkdir -p "$2" && echo base > "$2/box_0.img" ;;
   # as the real layer.sh does: refuse a layer dir that is not empty, and bind the layer to its base
@@ -191,6 +196,41 @@ PREPARE_AGAIN="key.sh --prepared space.sh hit image.sh pull key.sh --layer image
     [ "$(order)" = "$REBUILD_LAYER" ]
     [ "$(pushes)" = "image.sh push --replace $L layer" ]
     bound
+}
+
+# spec: when another run cached its own base first, this run's push is skipped (exit 4), and the
+#       layer made over this run's base is bound to an image that is not in the store; it is not
+#       cached (task 3 re-review, minor 1). This run still boots its own whole chain.
+@test "a base push another run beat: the layer made over this run's base is not cached" {
+    drop base layer
+    STUB_RACE=$K MVM_STORE=file run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(order)" = "key.sh --layer space.sh hit image.sh pull key.sh --base image.sh pull space.sh miss build.sh image.sh push space.sh layer layer.sh boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out" ]
+    [ "$(pushes)" = "image.sh push $K box" ]
+    [ "$(boots)" = "boot.sh layer" ]
+    [ ! -d "$(dir_of layer)" ]
+    run grep -q '^cache-save-key=' "$GITHUB_OUTPUT"
+    [ "$status" -ne 0 ]
+}
+
+# spec: a stale layer is pushed with --replace, which never skips; over a base this run could not
+#       cache, it would overwrite a layer another run made over the cached base
+@test "a base push another run beat: a stale layer is not replaced with one made over this run's base" {
+    drop base
+    STUB_RACE=$K run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(pushes)" = "image.sh push $K box" ]
+    [ "$(id layer image-id)" = "$B" ]
+}
+
+@test "a layer push another run beat: the prepared image made over this run's layer is not cached" {
+    drop layer
+    STUB_RACE=$L MVM_CACHE_AFTER_PREPARE=true run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(order)" = "key.sh --prepared space.sh hit image.sh pull key.sh --layer image.sh pull key.sh --base image.sh pull space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh boot.sh sync.sh in run.sh sync.sh out" ]
+    [ "$(pushes)" = "image.sh push $L layer" ]
+    [ "$(boots)" = "boot.sh layer boot.sh prepared" ]
+    [ ! -d "$(dir_of prepared)" ]
 }
 
 @test "a pull that errs (not a miss) fails the step and builds nothing" {

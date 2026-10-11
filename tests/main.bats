@@ -153,3 +153,14 @@ PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     grep -qxF 'key=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk' "$GITHUB_OUTPUT"
 }
+
+# spec: tests/build.bats -- build.sh takes the template first; a bare <dir> exits 2 and breaks the action
+@test "a miss and a disabled cache both build with build.sh mavericks <box-dir>" {
+    STUB_PULL=3 run main
+    [ "$status" -eq 0 ]
+    grep -qE '^build\.sh mavericks [^ ]+/box$' "$CALLS" || { cat "$CALLS"; false; }
+    : > "$CALLS"
+    MVM_DISABLE_CACHE=true run main
+    [ "$status" -eq 0 ]
+    grep -qE '^build\.sh mavericks [^ ]+/box$' "$CALLS" || { cat "$CALLS"; false; }
+}

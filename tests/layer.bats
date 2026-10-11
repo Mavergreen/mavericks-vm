@@ -87,3 +87,28 @@ X
     run layer "$BASE"
     [ "$status" -eq 2 ]
 }
+
+@test "a layer dir that already holds anything is refused, and left as it was" {
+    mkdir -p "$LAYER"; printf keep > "$LAYER/precious"
+    run layer "$BASE" "$LAYER"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"not empty"* ]] || false
+    [ "$(cat "$LAYER/precious")" = keep ]
+}
+
+@test "a failed build keeps an empty layer dir that was there before, and removes what it made" {
+    mkdir -p "$LAYER"
+    STUB_PACKER_FAIL=1 run layer "$BASE" "$LAYER"
+    [ "$status" -eq 1 ]
+    [ -d "$LAYER" ]
+    [ -z "$(ls -A "$LAYER")" ]
+}
+
+@test "a failed delta removes the files it wrote from an empty layer dir that was there before" {
+    mkdir -p "$LAYER"
+    printf '#!/bin/bash\nexit 1\n' > "$BATS_TEST_TMPDIR/qemu-img"; chmod +x "$BATS_TEST_TMPDIR/qemu-img"
+    PATH="$BATS_TEST_TMPDIR:$PATH" run layer "$BASE" "$LAYER"
+    [ "$status" -eq 1 ]
+    [ -d "$LAYER" ]
+    [ -z "$(ls -A "$LAYER")" ]
+}

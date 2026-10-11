@@ -15,7 +15,7 @@ avail_kib="${MVM_SPACE_AVAILABLE_KIB:-$(df -Pk "$dir" | awk 'NR == 2 { print $4 
 avail_gib=$((avail_kib / 1024 / 1024))
 # spec: tests/boot.bats -- each failure names its image and its step, here and nowhere else
 case "$1" in
-  hit) what="pulling the cached base, layer and prepared images" ;;
+  hit) what="pulling the cached images" ;;
   miss) what="building the base image" ;;
   layer) what="building the layer image" ;;
   prepare) what="snapshotting the prepared image" ;;

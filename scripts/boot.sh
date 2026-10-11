@@ -7,7 +7,7 @@
 #                   one ::error naming the image (<dir>'s name: layer, prepared; box is the base)
 set -euo pipefail
 
-[ $# -eq 1 ] || { echo "usage: boot.sh <dir>" >&2; exit 2; }
+[ $# -eq 1 ] || { echo "boot.sh: booting an image takes the one dir that holds it; usage: boot.sh <dir>" >&2; exit 2; }
 box="$1"
 # spec: tests/boot.bats -- one ::error per failure, naming the image and the step; main.sh adds
 #       none, so a failure not foreseen here is named on the way out

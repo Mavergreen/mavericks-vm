@@ -1,9 +1,13 @@
 #!/bin/bash
 # platform: GitHub's Linux runners only (bash) -- this Action runs nowhere else
 #   usage: main.sh
-#          env in:  MVM_* (scripts/inputs.sh), MVM_PREPARE, MVM_RUN, MVM_IMAGE_KEY, MVM_TOKEN
-#          out:     run's exit status; cache-after-prepare-hit in $GITHUB_OUTPUT; the guest left
-#                   running for later "ssh mavericks" and custom-shell steps
+#          env in:  MVM_* (scripts/inputs.sh), MVM_PREPARE, MVM_RUN, MVM_IMAGE_KEY, MVM_TOKEN;
+#                   MVM_BASE_RECIPE (optional: the plugin's base recipe, as action.yml's key step
+#                   fetched it; when empty, key.sh fetches it here)
+#          out:     run's exit status; in $GITHUB_OUTPUT, cache-after-prepare-hit and, in the repo
+#                   tier, cache-save-base, cache-save-layer and cache-save-prepared (true for each
+#                   image this run stored); the guest left running for later "ssh mavericks" and
+#                   custom-shell steps
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

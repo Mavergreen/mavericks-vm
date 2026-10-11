@@ -33,12 +33,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # spec: tests/self_test_workflow.bats -- the space check's thresholds are measured peaks:
-      #       free space on the data disk every 5 s while the Action runs (the sampler outlives
+      #       free space on the data disk every 5 s, with its time, while the Action runs (the sampler outlives
       #       this step, to the end of the job)
       - name: Sample the data disk while the Action runs
         run: |
           df -Pk /mnt | awk 'NR == 2 { print $4 }' > "$RUNNER_TEMP/free-before.kib"
-          ( while :; do df -Pk /mnt | awk 'NR == 2 { print $4 }' >> "$RUNNER_TEMP/free.kib"; sleep 5; done ) > /dev/null 2>&1 &
+          ( while :; do echo "$(date -u +%H:%M:%S) $(df -Pk /mnt | awk 'NR == 2 { print $4 }')" >> "$RUNNER_TEMP/free.kib"; sleep 5; done ) > /dev/null 2>&1 &
       - uses: ./
         with:
           image-key: ${{ secrets.MAVERICKS_VM_KEY }}
@@ -48,8 +48,12 @@ jobs:
       - name: The data disk's peak use
         if: always()
         run: |
-          before="$(cat "$RUNNER_TEMP/free-before.kib")"; low="$(sort -n "$RUNNER_TEMP/free.kib" | head -n 1)"
-          echo "peak use: $(( (before - low) / 1024 / 1024 )) GiB (free before: $(( before / 1024 / 1024 )) GiB, lowest: $(( low / 1024 / 1024 )) GiB)"
+          before="$(cat "$RUNNER_TEMP/free-before.kib")"; low="$(sort -n -k2 "$RUNNER_TEMP/free.kib" | head -n 1)"
+          echo "peak use: $(( (before - ${low#* }) / 1024 / 1024 )) GiB at ${low%% *} UTC (free before: $(( before / 1024 / 1024 )) GiB, lowest: $(( ${low#* } / 1024 / 1024 )) GiB)"
+          echo "::group::the data disk's use by minute (UTC, the most in each minute)"
+          awk -v b="$before" '{ m = substr($1, 1, 5); if (!(m in lo)) { order[++n] = m; lo[m] = $2 } else if ($2 < lo[m]) lo[m] = $2 }
+            END { for (i = 1; i <= n; i++) printf "%s %d GiB\n", order[i], (b - lo[order[i]]) / 1048576 }' "$RUNNER_TEMP/free.kib"
+          echo "::endgroup::"
 
   guest:
     needs: warm
@@ -76,12 +80,12 @@ jobs:
           grep -m1 'model name' /proc/cpuinfo; grep -m1 vendor_id /proc/cpuinfo
           df -h / /mnt; nproc; free -g
       # spec: tests/self_test_workflow.bats -- the space check's thresholds are measured peaks:
-      #       free space on the data disk every 5 s while the Action runs (the sampler outlives
+      #       free space on the data disk every 5 s, with its time, while the Action runs (the sampler outlives
       #       this step, to the end of the job)
       - name: Sample the data disk while the Action runs
         run: |
           df -Pk /mnt | awk 'NR == 2 { print $4 }' > "$RUNNER_TEMP/free-before.kib"
-          ( while :; do df -Pk /mnt | awk 'NR == 2 { print $4 }' >> "$RUNNER_TEMP/free.kib"; sleep 5; done ) > /dev/null 2>&1 &
+          ( while :; do echo "$(date -u +%H:%M:%S) $(df -Pk /mnt | awk 'NR == 2 { print $4 }')" >> "$RUNNER_TEMP/free.kib"; sleep 5; done ) > /dev/null 2>&1 &
       - uses: ./
         with:
           image-key: ${{ secrets.MAVERICKS_VM_KEY }}
@@ -119,8 +123,12 @@ jobs:
       - name: The data disk's peak use
         if: always()
         run: |
-          before="$(cat "$RUNNER_TEMP/free-before.kib")"; low="$(sort -n "$RUNNER_TEMP/free.kib" | head -n 1)"
-          echo "peak use: $(( (before - low) / 1024 / 1024 )) GiB (free before: $(( before / 1024 / 1024 )) GiB, lowest: $(( low / 1024 / 1024 )) GiB)"
+          before="$(cat "$RUNNER_TEMP/free-before.kib")"; low="$(sort -n -k2 "$RUNNER_TEMP/free.kib" | head -n 1)"
+          echo "peak use: $(( (before - ${low#* }) / 1024 / 1024 )) GiB at ${low%% *} UTC (free before: $(( before / 1024 / 1024 )) GiB, lowest: $(( ${low#* } / 1024 / 1024 )) GiB)"
+          echo "::group::the data disk's use by minute (UTC, the most in each minute)"
+          awk -v b="$before" '{ m = substr($1, 1, 5); if (!(m in lo)) { order[++n] = m; lo[m] = $2 } else if ($2 < lo[m]) lo[m] = $2 }
+            END { for (i = 1; i <= n; i++) printf "%s %d GiB\n", order[i], (b - lo[order[i]]) / 1048576 }' "$RUNNER_TEMP/free.kib"
+          echo "::endgroup::"
       - name: The guest's file came back
         run: test "$(cat roundtrip.txt)" = 'from the guest via ${{ matrix.sync }}'
       - name: Later steps reach the guest

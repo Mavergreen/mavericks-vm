@@ -143,7 +143,7 @@ X
     PATH="$BATS_TEST_TMPDIR:$PATH" run layer "$BASE" "$LAYER"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     grep -qx box_0.img "$LISTING"
-    ! grep -qx stale.img "$LISTING"
+    ! grep -qx stale.img "$LISTING" || false
 }
 
 @test "a failed build exits 1 naming the layer, and leaves neither the full image nor a layer dir" {

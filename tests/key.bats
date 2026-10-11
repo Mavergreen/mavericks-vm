@@ -173,7 +173,7 @@ $(printf 'a%.0s' {1..32})" run key --base
         [ "$status" -ne 0 ] || { echo "accepted: $bad"; false; }
         [[ "$output" == *"MVM_BASE_RECIPE"* ]] || false
     done
-    ! grep -q '^curl ' "$STUB_LOG"
+    ! grep -q '^curl ' "$STUB_LOG" || false
 }
 
 @test "no flag is a usage error" {

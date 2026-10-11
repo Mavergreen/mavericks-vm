@@ -598,7 +598,7 @@ RECIPE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     [ "$(grep -c 'key.sh --recipe' "$CALLS")" = 1 ]
     [ "$(sort -u "$BATS_TEST_TMPDIR/recipe-seen")" = $RECIPE ]
     [ ! -s "$BATS_TEST_TMPDIR/env" ]
-    ! field run | grep -q GITHUB_ENV
+    ! field run | grep -q GITHUB_ENV || false
 }
 
 @test "action.yml's main step takes the recipe from the key step, which is empty when no key step ran" {

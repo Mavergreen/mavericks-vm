@@ -17,15 +17,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Delete cached guests older than 30 days, except the current key
+      - name: Delete cached guests older than 30 days, except the current keys
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          keep="$(bash scripts/key.sh --base)"
+          # one fetch of the plugin's base recipe, handed to both keys
+          MVM_BASE_RECIPE="$(bash scripts/key.sh --recipe)"; export MVM_BASE_RECIPE
+          keep_base="$(bash scripts/key.sh --base)"
+          keep_layer="$(bash scripts/key.sh --layer)"
           cutoff="$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)"
           gh api --paginate "orgs/Mavergreen/packages/container/mavericks-vm-images/versions" \
-            --jq ".[] | select(.created_at < \"$cutoff\") | select((.metadata.container.tags | index(\"$keep\")) | not) | .id" \
+            --jq ".[] | select(.created_at < \"$cutoff\") | select((.metadata.container.tags | index(\"$keep_base\") or index(\"$keep_layer\")) | not) | .id" \
           | while read -r id; do
               echo "deleting package version $id"
               gh api -X DELETE "orgs/Mavergreen/packages/container/mavericks-vm-images/versions/$id"

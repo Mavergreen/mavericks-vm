@@ -640,7 +640,8 @@ RECIPE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     for img in base layer prepared; do
         n=$((n + 1))
         action_step actions/cache/save $n
-        [ "$(field if)" = "always() && steps.main.outputs.cache-save-$img == 'true'" ]
+        if [ $img = prepared ]; then [ "$(field if)" = "always() && steps.main.outputs.cache-save-$img == 'true' && steps.key.outputs.prepared != ''" ]
+        else [ "$(field if)" = "always() && steps.main.outputs.cache-save-$img == 'true'" ]; fi
         [ "$(field with path)" = "\${{ env.MVM_BLOB_DIR }}/\${{ steps.key.outputs.$img }}.tar.zst.age" ]
         [ "$(field with key)" = "mavericks-vm-$img-\${{ steps.key.outputs.$img }}-$RUN" ]
     done

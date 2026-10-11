@@ -123,3 +123,48 @@ PY
     [ "$status" -ne 0 ] || { echo "the none row passed a guest reporting OSXSAVE"; false; }
     [[ "$output" == *OSXSAVE* ]] || { echo "the failure does not name OSXSAVE: $output"; false; }
 }
+
+# spec: the Aqua Transport layer's purpose is that the guest's own /usr/bin/curl reaches modern
+#       HTTPS sites, so every guest job proves it from inside the guest, and that the layer's
+#       package is installed
+@test "the self-test's guest run block checks outgoing TLS with /usr/bin/curl and the Aqua Transport package" {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    run python3 - "$REPO/.github/workflows/self-test.yml" <<'PY'
+import sys, yaml
+guest = yaml.safe_load(open(sys.argv[1]))["jobs"]["guest"]
+script = [s for s in guest["steps"] if s.get("uses") == "./"][0]["with"]["run"]
+bad = []
+for s in ("/usr/bin/curl", "https://github.com/", "https://release-assets.githubusercontent.com/",
+          "https://downloads.claude.ai/claude-code-releases/latest", "TLS to $u failed",
+          "pkgutil --pkgs | grep -q '^Wowfunhappy\\.AquaTransport$'", "Aqua Transport"):
+    if s not in script:
+        bad.append("the run block lacks %r" % s)
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+PY
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
+# spec: the cached guests are the base and the layer over it: the weekly eviction keeps both
+#       current keys, from one fetch of the base recipe
+@test "the eviction step keeps both the base's and the layer's key, from one recipe fetch" {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    run python3 - "$REPO/.github/workflows/evict.yml" <<'PY'
+import sys, yaml
+steps = yaml.safe_load(open(sys.argv[1]))["jobs"]["evict"]["steps"]
+run = [s for s in steps if "key.sh" in s.get("run", "")][0]["run"]
+bad = []
+for s in ("key.sh --base", "key.sh --layer", "30 days ago"):
+    if s not in run:
+        bad.append("the run block lacks %r" % s)
+if run.count("key.sh --recipe") != 1:
+    bad.append("want one key.sh --recipe, got %d" % run.count("key.sh --recipe"))
+if run.count("MVM_BASE_RECIPE=") < 1 or "GITHUB_ENV" in run:
+    bad.append("the recipe is not handed on through MVM_BASE_RECIPE in the step's shell")
+if "$keep_base" not in run or "$keep_layer" not in run or "index" not in run:
+    bad.append("the jq filter does not keep both keys")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+PY
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+}

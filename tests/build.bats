@@ -29,7 +29,7 @@ build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
 @test "the template download is bounded in time" {
     run build "$BATS_TEST_TMPDIR/out"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    grep -q '^curl-args -fsSL --retry 3 --connect-timeout 20 --max-time 900 .*_mavericks_template.zip$' "$STUB_LOG" \
+    grep -q '^curl-args -fsSL --retry 3 --connect-timeout 20 --max-time 120 .*_mavericks_template.zip$' "$STUB_LOG" \
         || { cat "$STUB_LOG"; false; }
 }
 

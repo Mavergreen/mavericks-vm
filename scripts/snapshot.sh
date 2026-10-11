@@ -52,6 +52,7 @@ done
 mkdir -p "$out"
 # spec: tests/snapshot.bats -- run in <out-dir> so the relative backing file is stored as written;
 #       it resolves because the prepared dir is the layer dir's sibling in data-dir
+# spec: scripts/layer.sh -- convert -B copies every allocated cluster of its source: right for boot.sh's overlay (only runtime writes), wrong for layer.sh's full image
 (cd "$out" && qemu-img convert -O qcow2 -F qcow2 -B ../layer/box_0.img "$data/overlay.qcow2" box_0.img)
 for f in OVMF_CODE.fd OVMF_VARS.fd opencore.img; do cp "$box/$f" "$out/$f"; done
 od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > "$out/image-id"; echo >> "$out/image-id"

@@ -111,20 +111,24 @@ import sys, yaml
 steps = yaml.safe_load(open(sys.argv[1]))["runs"]["steps"]
 names = [s.get("name") for s in steps]
 uses = [s.get("uses", "") for s in steps]
-r = next(i for i, u in enumerate(uses) if u.startswith("actions/cache/restore@"))
-w = next(i for i, u in enumerate(uses) if u.startswith("actions/cache/save@"))
+rs = [i for i, u in enumerate(uses) if u.startswith("actions/cache/restore@")]
+ws = [i for i, u in enumerate(uses) if u.startswith("actions/cache/save@")]
 check = names.index("Check the inputs"); main = names.index("Run in Mavericks")
-ok = check < r < main < w
-save_if = steps[w].get("if", "")
-ok = ok and "always()" in save_if and "cache-save-key" in save_if
-ok = ok and "env.MVM_STORE == 'file'" in steps[r].get("if", "")
+ok = len(rs) == 2 and len(ws) == 2
+r, w = rs[0], ws[0]
+ok = ok and all(check < i < main for i in rs) and all(main < i for i in ws)
+for i, out in zip(ws, ("cache-save-base", "cache-save-delta")):
+    save_if = steps[i].get("if", "")
+    ok = ok and "always()" in save_if and out in save_if
+key_if = next(s for s in steps if s.get("id") == "key").get("if", "")
+ok = ok and all(steps[i].get("if", "") == key_if for i in rs) and "env.MVM_STORE == 'file'" in key_if
 # spec: tests/image.bats -- a guest that will not decrypt (the key changed) is rebuilt and saved
 #       under a newer name; restore takes the newest by prefix, never an exact name
 rw, ww = steps[r].get("with", {}), steps[w].get("with", {})
 # (tests/main.bats holds the full key and path table)
-ok = ok and rw.get("restore-keys", "").splitlines()[0].endswith("${{ steps.key.outputs.top }}-")
+ok = ok and rw.get("restore-keys", "").strip().endswith("${{ steps.key.outputs.base }}-")
 ok = ok and ww.get("key", "").endswith("-${{ github.run_id }}-${{ github.run_attempt }}")
-print(names, steps[w].get("if"))
+print(names, [steps[i].get("if") for i in ws])
 sys.exit(0 if ok else 1)
 PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }

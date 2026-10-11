@@ -16,14 +16,18 @@ step() { bash "$here/$1" "${@:2}"; }
 store="${MVM_STORE:-registry}"
 
 # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Two tiers" (in
-#       packer-plugin-macosx) -- in the repo tier, action.yml's save step saves the whole blob dir
-#       (this run's base, layer and prepared images, nothing else) once this run has stored any
-#       image in it; so after each successful push this names the top key (the prepared image's, or
-#       else the layer's), and a failing run still keeps what it stored. A run that stored nothing
-#       names nothing, and saves nothing.
-top=""
-pushed() {
-  if [ "$store" = file ]; then echo "cache-save-key=$top" >> "${GITHUB_OUTPUT:-/dev/null}"; fi
+#       packer-plugin-macosx) -- the repo tier keeps two actions/cache entries, so a change that
+#       moves only the layer never saves the ~6 GB base again: the base's, and the deltas' (the
+#       layer and the prepared image). After each successful push this says which entry has
+#       something new for action.yml's save steps (cache-save-base, cache-save-delta), so a failing
+#       run still keeps what it stored. A push that was skipped, and a run that stored nothing,
+#       name nothing.
+pushed() {  # $1 = base, layer or prepared: the image just stored
+  [ "$store" = file ] || return 0
+  case "$1" in
+    base) echo "cache-save-base=true" ;;
+    *) echo "cache-save-delta=true" ;;
+  esac >> "${GITHUB_OUTPUT:-/dev/null}"
 }
 
 # spec: tests/main.bats -- the repo tier keeps only this run's set: every <64-hex>.tar.zst.age in
@@ -31,7 +35,7 @@ pushed() {
 #       free their disk before anything is pulled or built, and a failing run never saves them;
 #       anything else in the dir is left alone
 prune_blobs() {  # $@ = this run's keys
-  local f k keep
+  local f k keep want
   [ -d "${MVM_BLOB_DIR:-}" ] || return 0
   for f in "$MVM_BLOB_DIR"/*.tar.zst.age; do
     [ -e "$f" ] || continue
@@ -131,7 +135,7 @@ push() {  # $1 = base, layer or prepared (pushed in that order); $2 = its key; $
       *) die "pushing the $1 image" ;;
     esac
   fi
-  pushed "$2"
+  pushed "$1"
 }
 
 want_prepared=false
@@ -145,12 +149,14 @@ if [ "${MVM_DISABLE_CACHE:-false}" = true ]; then
 else
   # spec: tests/main.bats -- with no prepare, the prepared guest is the layer guest: it is cached as
   #       the layer, and nothing is cached under a prepared key
+  # spec: tests/main.bats -- the base recipe is fetched once; key.sh uses it from the environment
+  MVM_BASE_RECIPE="$(step key.sh --recipe)" || die "fetching the base recipe"
+  export MVM_BASE_RECIPE
   if [ "$want_prepared" = true ]; then
     pkey="$(MVM_PREPARE="${MVM_PREPARE:-}" step key.sh --prepared)" || die "computing the prepared image's key"
   fi
   lkey="$(step key.sh --layer)" || die "computing the layer image's key"
   key="$(step key.sh --base)" || die "computing the base image's key"
-  top="${pkey:-$lkey}"
   if [ "$store" = file ]; then prune_blobs "$key" "$lkey" ${pkey:+"$pkey"}; fi
   step space.sh hit || exit 1
   if [ "$want_prepared" = true ]; then pull prepared "$pkey" "$prepared"; prep=$got; fi

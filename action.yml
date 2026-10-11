@@ -119,11 +119,13 @@ runs:
       run: bash "$GITHUB_ACTION_PATH/scripts/dirs.sh"
 
     # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Two tiers" (in
-    #       packer-plugin-macosx) -- the repo tier keeps the encrypted base, layer and prepared
-    #       images together in this repo's own actions/cache, restored after the input check so a
-    #       fork without a key never downloads them; main.sh prunes the blob dir to this run's
-    #       three keys, so it is one base plus deltas. Not run with the cache disabled, when main.sh
-    #       computes no keys, nor in the registry tier.
+    #       packer-plugin-macosx) -- the repo tier keeps the encrypted guest in this repo's own
+    #       actions/cache, restored after the input check so a fork without a key never downloads
+    #       it, as two entries: the base (one ~6 GB blob) and the deltas (the layer's and the
+    #       prepared blob), so a change that moves only the layer never saves the base again.
+    #       main.sh prunes the blob dir to this run's three keys. The step is not run with the
+    #       cache disabled, when main.sh computes no keys, nor in the registry tier. It fetches the
+    #       base recipe once, and leaves it in MVM_BASE_RECIPE for the keys here and in main.sh.
     - name: The cache keys
       id: key
       if: env.MVM_STORE == 'file' && env.MVM_DISABLE_CACHE != 'true'
@@ -131,21 +133,35 @@ runs:
       env:
         MVM_PREPARE: ${{ inputs.prepare }}
       run: |
-        base="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --base)"
-        layer="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --layer)"
-        top="$layer"
-        if [ "$MVM_CACHE_AFTER_PREPARE" = true ] && [ -n "$MVM_PREPARE" ]; then top="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --prepared)"; fi
-        { echo "base=$base"; echo "layer=$layer"; echo "top=$top"; } >> "$GITHUB_OUTPUT"
+        fail() { echo "::error title=mavericks-vm::computing the cache keys failed: $1"; exit 1; }
+        key() { bash "$GITHUB_ACTION_PATH/scripts/key.sh" "$@"; }
+        MVM_BASE_RECIPE="$(key --recipe)" || fail "the base recipe"
+        export MVM_BASE_RECIPE
+        base="$(key --base)" || fail "the base image's key"
+        layer="$(key --layer)" || fail "the layer image's key"
+        top="$layer" delta="$MVM_BLOB_DIR/$layer.tar.zst.age"
+        if [ "$MVM_CACHE_AFTER_PREPARE" = true ] && [ -n "$MVM_PREPARE" ]; then
+          top="$(key --prepared)" || fail "the prepared image's key"
+          delta="$delta"$'\n'"$MVM_BLOB_DIR/$top.tar.zst.age"
+        fi
+        { echo "base=$base"; echo "layer=$layer"; echo "top=$top"; echo "delta_paths<<MVM_EOF"; echo "$delta"; echo "MVM_EOF"; } >> "$GITHUB_OUTPUT"
+        echo "MVM_BASE_RECIPE=$MVM_BASE_RECIPE" >> "$GITHUB_ENV"
 
-    - name: Restore this repo's cached guest
+    - name: Restore this repo's cached base image
       if: env.MVM_STORE == 'file' && env.MVM_DISABLE_CACHE != 'true'
       uses: actions/cache/restore@v6.1.0
       with:
-        path: ${{ env.MVM_BLOB_DIR }}
-        key: mavericks-vm-${{ steps.key.outputs.base }}-${{ steps.key.outputs.top }}
-        restore-keys: |
-          mavericks-vm-${{ steps.key.outputs.base }}-${{ steps.key.outputs.top }}-
-          mavericks-vm-${{ steps.key.outputs.base }}-
+        path: ${{ env.MVM_BLOB_DIR }}/${{ steps.key.outputs.base }}.tar.zst.age
+        key: mavericks-vm-base-${{ steps.key.outputs.base }}
+        restore-keys: mavericks-vm-base-${{ steps.key.outputs.base }}-
+
+    - name: Restore this repo's cached layer and prepared images
+      if: env.MVM_STORE == 'file' && env.MVM_DISABLE_CACHE != 'true'
+      uses: actions/cache/restore@v6.1.0
+      with:
+        path: ${{ steps.key.outputs.delta_paths }}
+        key: mavericks-vm-delta-${{ steps.key.outputs.top }}
+        restore-keys: mavericks-vm-delta-${{ steps.key.outputs.top }}-
 
     - name: Install QEMU, age, oras and packer
       shell: bash
@@ -166,9 +182,16 @@ runs:
     # spec: tests/image.bats -- a cache entry's name can never be reused, so each save gets a new
     #       one; when a guest is rebuilt because the cached one would not decrypt, restore's prefix
     #       match then takes the newer entry, and the old one ages out
-    - name: Save the guest this run cached
-      if: always() && steps.main.outputs.cache-save-key != ''
+    - name: Save the base image this run cached
+      if: always() && steps.main.outputs.cache-save-base == 'true'
       uses: actions/cache/save@v6.1.0
       with:
-        path: ${{ env.MVM_BLOB_DIR }}
-        key: mavericks-vm-${{ steps.key.outputs.base }}-${{ steps.key.outputs.top }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ env.MVM_BLOB_DIR }}/${{ steps.key.outputs.base }}.tar.zst.age
+        key: mavericks-vm-base-${{ steps.key.outputs.base }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+    - name: Save the layer and prepared images this run cached
+      if: always() && steps.main.outputs.cache-save-delta == 'true'
+      uses: actions/cache/save@v6.1.0
+      with:
+        path: ${{ steps.key.outputs.delta_paths }}
+        key: mavericks-vm-delta-${{ steps.key.outputs.top }}-${{ github.run_id }}-${{ github.run_attempt }}

@@ -83,6 +83,14 @@ key() { bash "$REPO/scripts/key.sh" "$@"; }
     [[ "$output" == *"packer-plugin-macosx_v0.20261005.2_mavericks_base_recipe.txt"* ]] || false
 }
 
+@test "a missing base-recipe asset fails the layer and prepared keys too, not only the base" {
+    for m in --layer --prepared; do
+        STUB_BASE_RECIPE= MVM_PREPARE=x run key $m
+        [ "$status" -ne 0 ] || { echo "$m: status 0: $output"; false; }
+        [[ "$output" == *"mavericks_base_recipe.txt"* ]] || false
+    done
+}
+
 @test "a recipe that is not 64 hex digits fails" {
     for bad in abc "$(printf 'A%.0s' {1..64})" "$(printf 'a%.0s' {1..63})" "$(printf 'a%.0s' {1..65})" "$(printf 'g%.0s' {1..64})"; do
         STUB_BASE_RECIPE="$bad" run key --base
@@ -96,6 +104,43 @@ key() { bash "$REPO/scripts/key.sh" "$@"; }
 $(printf 'a%.0s' {1..32})" run key --base
     [ "$status" -ne 0 ]
     [[ "$output" == *"mavericks_base_recipe.txt"* ]] || false
+}
+
+# spec: key.sh --layer and --prepared compute the base key, and with it fetch the base recipe; a
+#       caller that has fetched it once (action.yml's key step, main.sh) hands it on in MVM_BASE_RECIPE
+@test "--recipe prints the base recipe it fetched" {
+    run key --recipe
+    [ "$status" -eq 0 ]
+    [ "$output" = "$STUB_BASE_RECIPE" ]
+    grep -q '^curl ' "$STUB_LOG"
+}
+
+@test "a base recipe in MVM_BASE_RECIPE is used and nothing is fetched, for every key" {
+    want="$(key --prepared)"; base="$(key --base)"; layer="$(key --layer)"
+    : > "$STUB_LOG"
+    export MVM_BASE_RECIPE="$STUB_BASE_RECIPE"
+    export STUB_BASE_RECIPE=
+    [ "$(key --base)" = "$base" ]
+    [ "$(key --layer)" = "$layer" ]
+    [ "$(key --recipe)" = "$MVM_BASE_RECIPE" ]
+    [ ! -s "$STUB_LOG" ] || { cat "$STUB_LOG"; false; }
+    [ -n "$want" ]
+}
+
+@test "a base recipe in MVM_BASE_RECIPE moves the keys as the fetched one would" {
+    base="$(key --base)"
+    MVM_BASE_RECIPE="$(printf 'b%.0s' {1..64})" run key --base
+    [ "$status" -eq 0 ]
+    [ "$output" != "$base" ]
+}
+
+@test "an MVM_BASE_RECIPE that is not one line of 64 hex digits fails, and is not fetched around" {
+    for bad in abc "$(printf 'A%.0s' {1..64})" "$(printf 'a%.0s' {1..65})"; do
+        MVM_BASE_RECIPE="$bad" run key --base
+        [ "$status" -ne 0 ] || { echo "accepted: $bad"; false; }
+        [[ "$output" == *"MVM_BASE_RECIPE"* ]] || false
+    done
+    ! grep -q '^curl ' "$STUB_LOG"
 }
 
 @test "no flag is a usage error" {

@@ -43,6 +43,26 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     grep -q "^id=target,if=none,format=qcow2,detect-zeroes=unmap,discard=unmap,file=$MVM_DATA_DIR/" "$STUB_QEMU_ARGV"
 }
 
+# spec: a layer or prepared image is a delta over the image below it; booting one whose chain has a
+#       missing link fails late and obscurely inside the guest, so the chain is checked first
+@test "the backing chain is checked before the overlay is made" {
+    STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    ci=$(grep -nxF "qemu-img info --backing-chain $BOX/box_0.img" "$STUB_LOG" | cut -d: -f1)
+    cc=$(grep -n '^qemu-img create' "$STUB_LOG" | cut -d: -f1)
+    [ -n "$ci" ] && [ -n "$cc" ] && [ "$ci" -lt "$cc" ] || { cat "$STUB_LOG"; false; }
+}
+
+@test "a broken backing chain fails, by name and with qemu-img's words, before QEMU starts" {
+    STUB_QEMU_IMG_INFO_FAIL="qemu-img: Could not open '../box/box_0.img': No such file or directory" \
+        STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error title=mavericks-vm::the cached guest's backing chain is broken: qemu-img: Could not open '../box/box_0.img': No such file or directory"* ]] || false
+    [ ! -e "$STUB_QEMU_ARGV" ]
+    run grep -q '^qemu-img create' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
 @test "cpu-model reaches -cpu unchanged" {
     MVM_CPU_MODEL=Nehalem STUB_SSH_UP=1 run boot "$BOX"
     [ "$status" -eq 0 ]
@@ -125,4 +145,8 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     MVM_SPACE_AVAILABLE_KIB=1048576 run bash "$REPO/scripts/space.sh" prepare
     [ "$status" -ne 0 ]
     [[ "$output" == *"prepare"* ]] || false
+    # the Aqua Transport layer's build is checked on its own
+    MVM_SPACE_AVAILABLE_KIB=1048576 run bash "$REPO/scripts/space.sh" layer
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"a cache layer needs"* ]] || false
 }

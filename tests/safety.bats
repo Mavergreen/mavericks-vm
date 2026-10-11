@@ -10,7 +10,7 @@ setup() {
     export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME/.ssh"; : > "$HOME/.ssh/config"
     S="$BATS_TEST_TMPDIR/scripts"; mkdir -p "$S"; cp "$REPO/scripts/main.sh" "$S/"
     export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
-    for f in key.sh image.sh build.sh boot.sh sync.sh run.sh shell-wrapper.sh space.sh snapshot.sh; do
+    for f in key.sh image.sh build.sh layer.sh boot.sh sync.sh run.sh shell-wrapper.sh space.sh snapshot.sh; do
         cat > "$S/$f" <<STUB
 #!/bin/bash
 printf '%s %s\n' "$f" "\$*" >> "\$CALLS"
@@ -28,16 +28,18 @@ STUB
     export MVM_PREPARE= MVM_RUN='echo run' MVM_IMAGE_KEY='AGE-SECRET-KEY-1NEVERINALOG'
 }
 
-@test "when the step ends, the decrypted guest is gone from disk" {
-    run bash "$S/main.sh"
+# spec: a prepared hit pulls all three images: the prepared, its layer and their base
+@test "when the step ends, the decrypted guest is gone from disk: base, layer and prepared" {
+    MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='echo prep' run bash "$S/main.sh"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    [ ! -e "$MVM_DATA_DIR/box/box_0.img" ]
+    grep -q "^image.sh pull .* $MVM_DATA_DIR/prepared$" "$CALLS"
+    for d in box layer prepared; do [ -d "$MVM_DATA_DIR/$d" ] && [ ! -e "$MVM_DATA_DIR/$d/box_0.img" ] || { echo "left: $d"; false; }; done
 }
 
 @test "even a failing run removes the decrypted guest" {
     MVM_RUN='fail' run bash "$S/main.sh"
     [ "$status" -eq 7 ]
-    [ ! -e "$MVM_DATA_DIR/box/box_0.img" ]
+    for d in box layer; do [ -d "$MVM_DATA_DIR/$d" ] && [ ! -e "$MVM_DATA_DIR/$d/box_0.img" ] || { echo "left: $d"; false; }; done
 }
 
 @test "debug-on-error prints the guest's system log when run fails" {

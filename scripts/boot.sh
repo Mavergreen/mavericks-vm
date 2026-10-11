@@ -19,6 +19,13 @@ for f in box_0.img OVMF_CODE.fd OVMF_VARS.fd opencore.img; do
   [ -f "$box/$f" ] || { echo "::error title=mavericks-vm::the cached guest has no $f"; exit 1; }
 done
 
+# spec: tests/boot.bats -- a layer or prepared image is a delta over the image below it; one whose
+#       chain has a missing link is refused here, before QEMU starts, rather than failing in the guest
+if ! chain="$(qemu-img info --backing-chain "$box/box_0.img" 2>&1)"; then
+  echo "::error title=mavericks-vm::the cached guest's backing chain is broken: $chain"
+  exit 1
+fi
+
 overlay="$data/overlay.qcow2"
 qemu-img create -f qcow2 -F qcow2 -b "$box/box_0.img" "$overlay" > /dev/null
 

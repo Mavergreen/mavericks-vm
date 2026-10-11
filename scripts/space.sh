@@ -1,11 +1,11 @@
 #!/bin/bash
 # platform: GitHub's Linux runners only (bash, GNU df) -- this Action runs nowhere else
-#   usage: space.sh hit|miss|prepare
+#   usage: space.sh hit|miss|layer|prepare
 #          env in:  MVM_DATA_DIR; MVM_SPACE_AVAILABLE_KIB (tests only: instead of df)
 #          out:     exit 0, or an ::error:: naming data-dir, the room there and the room needed
 set -euo pipefail
 
-case "${1:-}" in hit|miss|prepare) ;; *) echo "usage: space.sh hit|miss|prepare" >&2; exit 2 ;; esac
+case "${1:-}" in hit|miss|layer|prepare) ;; *) echo "usage: space.sh hit|miss|layer|prepare" >&2; exit 2 ;; esac
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dir="${MVM_DATA_DIR:?space.sh: MVM_DATA_DIR is unset}"
 mkdir -p "$dir"

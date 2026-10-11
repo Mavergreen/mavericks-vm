@@ -1,8 +1,8 @@
 name: evict
 
 # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "The cache" (in packer-plugin-macosx)
-#       -- prune cached guests older than 30 days, never the current key; the registry reports no
-#       last-pulled time, so age is by creation
+#       -- prune cached guests older than 30 days, never the current base and layer keys; the
+#       registry reports no last-pulled time, so age is by creation
 on:
   schedule:
     - cron: '41 6 * * 1'

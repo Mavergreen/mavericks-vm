@@ -48,11 +48,32 @@ layer() { bash "$REPO/scripts/layer.sh" "$@"; }
     [ ! -e "$MVM_DATA_DIR/layer-full" ]
 }
 
+# The base is compared by name, size, mode, mtime and content before and after.
+base_state() { (cd "$BASE" && find . -printf '%p %y %s %m %T@\n' | sort; find . -type f | sort | xargs cat | cksum); }
+
 @test "the base is never written" {
-    before="$(cd "$BASE" && find . -type f | sort | xargs cat | cksum)$(ls -A "$BASE")"
+    printf oc > "$BASE/opencore.img"
+    before="$(base_state)"
+    sleep 1
     run layer "$BASE" "$LAYER"
-    [ "$status" -eq 0 ]
-    [ "$before" = "$(cd "$BASE" && find . -type f | sort | xargs cat | cksum)$(ls -A "$BASE")" ]
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$before" = "$(base_state)" ] || { echo "base changed"; false; }
+}
+
+# spec: a stale full image from an earlier run must not be unpacked over or beside
+@test "a leftover in layer-full does not survive into the new layer build" {
+    mkdir -p "$MVM_DATA_DIR/layer-full"; printf stale > "$MVM_DATA_DIR/layer-full/stale.img"
+    cat > "$BATS_TEST_TMPDIR/qemu-img" <<'X'
+#!/bin/bash
+ls -A "$(dirname "$8")" > "$LISTING"
+exit 0
+X
+    chmod +x "$BATS_TEST_TMPDIR/qemu-img"
+    export LISTING="$BATS_TEST_TMPDIR/listing"
+    PATH="$BATS_TEST_TMPDIR:$PATH" run layer "$BASE" "$LAYER"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qx box_0.img "$LISTING"
+    ! grep -qx stale.img "$LISTING"
 }
 
 @test "a failed build exits 1 naming the layer, and leaves neither the full image nor a layer dir" {
@@ -111,4 +132,13 @@ X
     [ "$status" -eq 1 ]
     [ -d "$LAYER" ]
     [ -z "$(ls -A "$LAYER")" ]
+}
+
+@test "a layer dir that cannot be read is not taken for an empty one" {
+    [ "$(id -u)" -ne 0 ] || skip "root reads everything"
+    mkdir -p "$LAYER"; chmod 000 "$LAYER"
+    run layer "$BASE" "$LAYER"
+    chmod 755 "$LAYER"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"cannot read"* ]] || false
 }

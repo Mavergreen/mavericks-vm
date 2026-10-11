@@ -104,9 +104,30 @@ build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
     [ "$status" -ne 0 ]
 }
 
-@test "the layer template needs a base directory, and an unknown template is refused" {
+@test "the layer template needs a base directory" {
     run build_layer "$BATS_TEST_TMPDIR/out"
     [ "$status" -eq 2 ]
+    [[ "$output" == *"mavericks-aquatransport needs <base-dir>"* ]] || false
+}
+
+@test "an unknown template is refused with a usage line naming the two templates" {
     run bash "$REPO/scripts/build.sh" bogus "$BATS_TEST_TMPDIR/out"
     [ "$status" -eq 2 ]
+    [[ "$output" == *"unknown template: bogus"* ]] || false
+    [[ "$output" == *"mavericks"* && "$output" == *"mavericks-aquatransport"* ]] || false
+}
+
+@test "the base guest's template takes no base directory" {
+    run bash "$REPO/scripts/build.sh" mavericks "$BATS_TEST_TMPDIR/out" "$BATS_TEST_TMPDIR/base"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"takes no <base-dir>"* ]] || false
+}
+
+# spec: packer runs in the template dir, so a relative base would resolve against that instead
+@test "a relative base directory reaches packer as an absolute path" {
+    mkdir -p "$BATS_TEST_TMPDIR/rel/base"
+    cd "$BATS_TEST_TMPDIR/rel"
+    run build_layer "$BATS_TEST_TMPDIR/out" base
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q " -var base_box=$BATS_TEST_TMPDIR/rel/base " "$STUB_LOG"
 }

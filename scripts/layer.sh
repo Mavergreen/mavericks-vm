@@ -5,7 +5,7 @@
 #          in:      <base-dir>, the unpacked base guest, which must be <layer-dir>/../box; never written
 #          out:     <layer-dir> holding box_0.img, a qcow2 delta whose backing file is the literal
 #                   ../box/box_0.img, and the layer build's OVMF_CODE.fd, OVMF_VARS.fd, opencore.img;
-#                   on failure, no <layer-dir>, no $MVM_DATA_DIR/layer-full, and exit 1
+#                   on failure, nothing this run made (and an <layer-dir> must be absent or empty), no $MVM_DATA_DIR/layer-full, and exit 1
 set -euo pipefail
 
 [ $# -eq 2 ] || { echo "usage: layer.sh <base-dir> <layer-dir>" >&2; exit 2; }
@@ -21,12 +21,21 @@ if [ "$(realpath -m "$base")" != "$(realpath -m "$layer/../box")" ]; then
   exit 2
 fi
 
+# spec: tests/layer.bats -- a layer dir that is not empty is somebody's; refuse before touching it
+if [ -n "$(ls -A "$layer" 2>/dev/null)" ]; then
+  echo "layer.sh: <layer-dir> $layer is not empty; refusing to write over it" >&2
+  exit 2
+fi
+made=false; [ -e "$layer" ] || made=true
+
 # spec: tests/layer.bats -- the decrypted full image leaves the disk however this ends, and a partial
 #       layer dir is never left looking complete
 ok=false
 cleanup() {
   rm -rf "$full"
-  [ "$ok" = true ] || rm -rf "$layer"
+  if [ "$ok" != true ]; then  # remove only what this run made
+    if [ "$made" = true ]; then rm -rf "$layer"; else find "$layer" -mindepth 1 -delete 2>/dev/null || true; fi
+  fi
 }
 trap cleanup EXIT
 # spec: tests/layer.bats -- the exact error line is the one the brief names; build.sh's own lines precede it

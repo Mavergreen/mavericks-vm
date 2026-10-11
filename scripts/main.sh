@@ -55,7 +55,7 @@ key="" pkey=""
 get_base() {  # $1 = "checked" when room for a hit was already checked; leaves the guest in $box
   if [ "${MVM_DISABLE_CACHE:-false}" = true ]; then
     step space.sh miss || exit 1
-    step build.sh "$box" || exit 1
+    step build.sh mavericks "$box" || exit 1
     return
   fi
   [ "${1:-}" = checked ] || step space.sh hit || exit 1
@@ -63,7 +63,7 @@ get_base() {  # $1 = "checked" when room for a hit was already checked; leaves t
   case "$rc" in
     0) ;;
     3) step space.sh miss || exit 1
-       step build.sh "$box" || exit 1
+       step build.sh mavericks "$box" || exit 1
        # spec: tests/main.bats -- a repo's 10 GB cache cannot hold a base and a prepared guest
        #       both, so with cache-after-prepare the repo tier keeps only the prepared one
        if [ "$store" = file ] && [ -n "$pkey" ]; then return; fi

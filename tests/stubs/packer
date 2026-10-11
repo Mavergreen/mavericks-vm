@@ -14,8 +14,10 @@ case "$1" in
       echo "Build 'qemu.mavericks' errored: the host check refused"; exit 1
     fi
     printf 'PACKER_CACHE_DIR=%s\n' "${PACKER_CACHE_DIR:-}" >> "$STUB_LOG"
+    # the layer template's box is named for the layer, as the plugin's is
+    case "$PWD" in *-aquatransport) name=aquatransport ;; *) name="" ;; esac
     mkdir -p output s && printf disk > s/box_0.img && printf code > s/OVMF_CODE.fd \
       && printf vars > s/OVMF_VARS.fd && printf oc > s/opencore.img && printf '{}' > s/metadata.json \
-      && tar -C s -czf output/mavericks-10.9.5-libvirt.box . ;;
+      && tar -C s -czf "output/mavericks-10.9.5${name:+-$name}-libvirt.box" . ;;
   *) exit 2 ;;
 esac

@@ -1,0 +1,89 @@
+#!/usr/bin/env bats
+#
+# The Aqua Transport layer: the plugin's mavericks-aquatransport box, built over the base box and
+# cached as a thin qcow2 delta over the base's disk.
+
+setup() {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    export PATH="$REPO/tests/stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
+    : > "$STUB_LOG"
+    export MVM_DATA_DIR="$BATS_TEST_TMPDIR/data" MVM_CACHE_DIR="$BATS_TEST_TMPDIR/data/cache"
+    mkdir -p "$MVM_DATA_DIR/box" "$BATS_TEST_TMPDIR/z/templates/mavericks-aquatransport"
+    printf 'source "qemu" "aquatransport" {}\n' > "$BATS_TEST_TMPDIR/z/templates/mavericks-aquatransport/a.pkr.hcl"
+    (cd "$BATS_TEST_TMPDIR/z" && zip -qr ../template.zip templates)
+    export STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/template.zip"
+    printf basedisk > "$MVM_DATA_DIR/box/box_0.img"
+    BASE="$MVM_DATA_DIR/box"; LAYER="$MVM_DATA_DIR/layer"
+}
+
+layer() { bash "$REPO/scripts/layer.sh" "$@"; }
+
+@test "the layer is built over the base box, by the layer template" {
+    run layer "$BASE" "$LAYER"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q "^curl .*_mavericks-aquatransport_template.zip$" "$STUB_LOG"
+    grep -q "^packer build .*-var base_box=$BASE" "$STUB_LOG"
+}
+
+@test "the delta is made with the exact convert line, run in the layer dir" {
+    run layer "$BASE" "$LAYER"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qxF "qemu-img convert -O qcow2 -F qcow2 -B ../box/box_0.img $MVM_DATA_DIR/layer-full/box_0.img box_0.img" "$STUB_LOG"
+    grep -qxF "cwd $LAYER" "$STUB_LOG"
+    [ -f "$LAYER/box_0.img" ]
+}
+
+@test "the firmware comes from the layer's own build" {
+    run layer "$BASE" "$LAYER"
+    [ "$status" -eq 0 ]
+    for f in OVMF_CODE.fd OVMF_VARS.fd opencore.img; do
+        [ -f "$LAYER/$f" ] || { echo "missing $f"; false; }
+    done
+}
+
+# spec: docs "Safety" -- the decrypted guest leaves the disk when the step ends
+@test "the full image is deleted afterwards" {
+    run layer "$BASE" "$LAYER"
+    [ "$status" -eq 0 ]
+    [ ! -e "$MVM_DATA_DIR/layer-full" ]
+}
+
+@test "the base is never written" {
+    before="$(cd "$BASE" && find . -type f | sort | xargs cat | cksum)$(ls -A "$BASE")"
+    run layer "$BASE" "$LAYER"
+    [ "$status" -eq 0 ]
+    [ "$before" = "$(cd "$BASE" && find . -type f | sort | xargs cat | cksum)$(ls -A "$BASE")" ]
+}
+
+@test "a failed build exits 1 naming the layer, and leaves neither the full image nor a layer dir" {
+    STUB_PACKER_FAIL=1 run layer "$BASE" "$LAYER"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error title=mavericks-vm::building the Aqua Transport layer"* ]] || false
+    [ ! -e "$MVM_DATA_DIR/layer-full" ]
+    [ ! -e "$LAYER" ]
+}
+
+@test "a failed delta exits 1 naming the layer, and leaves neither the full image nor a layer dir" {
+    cat > "$BATS_TEST_TMPDIR/qemu-img" <<'X'
+#!/bin/bash
+exit 1
+X
+    chmod +x "$BATS_TEST_TMPDIR/qemu-img"
+    PATH="$BATS_TEST_TMPDIR:$PATH" run layer "$BASE" "$LAYER"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error title=mavericks-vm::building the Aqua Transport layer"* ]] || false
+    [ ! -e "$MVM_DATA_DIR/layer-full" ]
+    [ ! -e "$LAYER" ]
+}
+
+@test "a base that is not the layer's sibling box is refused, since the backing would not resolve" {
+    run layer "$MVM_DATA_DIR/elsewhere" "$LAYER"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"../box"* ]] || false
+    [ ! -e "$LAYER" ]
+}
+
+@test "arguments are required" {
+    run layer "$BASE"
+    [ "$status" -eq 2 ]
+}

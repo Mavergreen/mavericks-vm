@@ -8,14 +8,16 @@ setup() {
     : > "$STUB_LOG"
     export MVM_DATA_DIR="$BATS_TEST_TMPDIR/data" MVM_CACHE_DIR="$BATS_TEST_TMPDIR/data/cache"
     # A template zip shaped like the release's: templates/mavericks/...
-    mkdir -p "$BATS_TEST_TMPDIR/z/templates/mavericks"
+    mkdir -p "$BATS_TEST_TMPDIR/z/templates/mavericks" "$BATS_TEST_TMPDIR/z/templates/mavericks-aquatransport"
     printf 'source "qemu" "mavericks" {}\n' > "$BATS_TEST_TMPDIR/z/templates/mavericks/mavericks.pkr.hcl"
+    printf 'source "qemu" "aquatransport" {}\n' > "$BATS_TEST_TMPDIR/z/templates/mavericks-aquatransport/mavericks-aquatransport.pkr.hcl"
     (cd "$BATS_TEST_TMPDIR/z" && zip -qr ../template.zip templates)
     export STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/template.zip"
     PIN="$(tr -d '[:space:]' < "$REPO/components/packer-plugin-macosx/version")"
 }
 
-build() { bash "$REPO/scripts/build.sh" "$@"; }
+build() { bash "$REPO/scripts/build.sh" mavericks "$@"; }
+build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
 
 @test "the template comes from the pinned release, by its exact asset name" {
     run build "$BATS_TEST_TMPDIR/out"
@@ -83,4 +85,28 @@ build() { bash "$REPO/scripts/build.sh" "$@"; }
     grep -qxF 'packer-token build ' "$STUB_LOG"
     run grep -F ghp_buildtoken "$STUB_LOG"
     [ "$status" -ne 0 ]
+}
+
+# spec: the template name picks the release asset, and the layer's template is given the base box
+@test "the layer template comes from its own asset, and is given the base box" {
+    mkdir -p "$BATS_TEST_TMPDIR/base"
+    run build_layer "$BATS_TEST_TMPDIR/out" "$BATS_TEST_TMPDIR/base"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qxF "curl https://github.com/Mavergreen/packer-plugin-macosx/releases/download/$PIN/packer-plugin-macosx_${PIN}_mavericks-aquatransport_template.zip" "$STUB_LOG"
+    grep -q "^packer build .*-var-file=$REPO/box.pkrvars.hcl .*-var base_box=$BATS_TEST_TMPDIR/base" "$STUB_LOG"
+    [ -f "$BATS_TEST_TMPDIR/out/box_0.img" ]
+}
+
+@test "the base guest's build is given no base box" {
+    run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ]
+    run grep -F base_box "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
+@test "the layer template needs a base directory, and an unknown template is refused" {
+    run build_layer "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 2 ]
+    run bash "$REPO/scripts/build.sh" bogus "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 2 ]
 }

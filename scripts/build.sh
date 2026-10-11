@@ -1,24 +1,35 @@
 #!/bin/bash
 # platform: GitHub's Linux runners only (bash, GNU tar, curl, unzip) -- this Action runs nowhere else
-#   usage: build.sh <dir>
+#   usage: build.sh <template> <dir> [<base-dir>]
+#          <template> is mavericks, or mavericks-aquatransport (which needs <base-dir>: an unpacked
+#          Mavericks box, read and never written)
 #          env in:  MVM_DATA_DIR, MVM_CACHE_DIR
 #          out:     the guest's box contents (box_0.img, OVMF_CODE.fd, OVMF_VARS.fd, opencore.img,
 #                   ...) in <dir>; on failure, the end of packer's output and exit 1
 set -euo pipefail
 
-[ $# -eq 1 ] || { echo "usage: build.sh <dir>" >&2; exit 2; }
-out="$1"
+usage="usage: build.sh <template> <dir> [<base-dir>]"
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then echo "$usage" >&2; exit 2; fi
+template="$1"; out="$2"; base="${3:-}"
+extra=()
+case "$template" in
+  mavericks) [ -z "$base" ] || { echo "$usage (mavericks takes no <base-dir>)" >&2; exit 2; } ;;
+  mavericks-aquatransport)
+    [ -n "$base" ] || { echo "$usage (mavericks-aquatransport needs <base-dir>)" >&2; exit 2; }
+    extra=(-var "base_box=$base") ;;
+  *) echo "$usage (unknown template: $template)" >&2; exit 2 ;;
+esac
 root="$(cd "$(dirname "$0")/.." && pwd)"
 pin="$(tr -d '[:space:]' < "$root/components/packer-plugin-macosx/version")"
 data="${MVM_DATA_DIR:?build.sh: MVM_DATA_DIR is unset}"
 work="$data/build"
 mkdir -p "$work" "${MVM_CACHE_DIR:?build.sh: MVM_CACHE_DIR is unset}"
 
-zip="packer-plugin-macosx_${pin}_mavericks_template.zip"
+zip="packer-plugin-macosx_${pin}_${template}_template.zip"
 curl -fsSL --retry 3 -o "$work/$zip" \
   "https://github.com/Mavergreen/packer-plugin-macosx/releases/download/$pin/$zip"
 (cd "$work" && unzip -q -o "$zip")
-tpl="$work/templates/mavericks"
+tpl="$work/templates/$template"
 
 export PACKER_PLUGIN_PATH="$data/packer-plugins" PACKER_CACHE_DIR="$MVM_CACHE_DIR" CHECKPOINT_DISABLE=1
 # spec: tests/build.bats -- exactly the pinned plugin, installed before init: init alone would
@@ -39,17 +50,21 @@ quiet packer plugins install github.com/mavergreen/macosx "$pin"
 (cd "$tpl" && quiet packer init .)
 
 log="$work/packer-build.log"
-if ! (cd "$tpl" && packer build -var-file="$root/box.pkrvars.hcl" .) > "$log" 2>&1; then
-  echo "::error title=mavericks-vm::building the guest with packer-plugin-macosx $pin failed; the end of packer's output:"
+if ! (cd "$tpl" && packer build -var-file="$root/box.pkrvars.hcl" "${extra[@]}" .) > "$log" 2>&1; then
+  echo "::error title=mavericks-vm::building the guest ($template) with packer-plugin-macosx $pin failed; the end of packer's output:"
   tail -n 40 "$log"
   exit 1
 fi
 
-box="$(ls "$tpl"/output/*.box)"
+# spec: tests/build.bats -- the layer's box is the one named for the layer
+case "$template" in
+  mavericks-aquatransport) box="$(ls "$tpl"/output/*-aquatransport-*.box)" ;;
+  *) box="$(ls "$tpl"/output/*.box)" ;;
+esac
 mkdir -p "$out"
 tar -xzf "$box" -C "$out"
 # spec: tests/build.bats -- the guest leaves the disk when the step ends: packer's output (the box,
 #       and the image it was made from) goes as soon as the box is unpacked into <dir>, which
 #       main.sh's own cleanup covers
 find "$work" -mindepth 1 -delete
-echo "build.sh: built the guest with packer-plugin-macosx $pin"
+echo "build.sh: built the guest ($template) with packer-plugin-macosx $pin"

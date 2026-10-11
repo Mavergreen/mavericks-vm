@@ -8,6 +8,7 @@
 #                   ../box/box_0.img, and the layer build's OVMF_CODE.fd, OVMF_VARS.fd, opencore.img;
 #                   image-id (fresh: 32 hex digits) and backing-id (the base's image-id);
 #                   on failure, nothing this run made (and an <layer-dir> must be absent or empty), no $MVM_DATA_DIR/layer-full, and exit 1
+#                   after the one ::error naming the layer (exit 2: a usage error, not annotated)
 set -euo pipefail
 
 [ $# -eq 2 ] || { echo "usage: layer.sh <base-dir> <layer-dir>" >&2; exit 2; }
@@ -59,11 +60,11 @@ base_id="$(cat "$base/image-id" 2>/dev/null || true)"
 [[ "$base_id" =~ ^[0-9a-f]{32}$ ]] || fail "the base has no image-id in $base/image-id, so the layer cannot be bound to it"
 
 # spec: tests/layer.bats -- a full image left by an earlier run is not built over or beside
-rm -rf "$full"
+rm -rf "$full" || fail "removing an earlier layer-full failed"
 # build.sh's own lines precede the error line
 bash "$here/build.sh" mavericks-aquatransport "$full" "$base" || fail
 
-mkdir -p "$layer"
+mkdir -p "$layer" || fail "making $layer failed"
 # spec: tests/layer.bats -- run in the layer dir so the relative backing file is stored as written
 (cd "$layer" && qemu-img convert -O qcow2 -F qcow2 -B ../box/box_0.img "$full/box_0.img" box_0.img) \
   || fail "writing the delta over the base failed"

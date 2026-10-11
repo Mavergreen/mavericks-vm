@@ -14,9 +14,9 @@ setup() {
 #!/bin/bash
 f="$(basename "$0")"
 printf '%s %s\n' "$f" "$*" >> "$CALLS"
-# STUB_FAIL: a glob over "<step> <args>"; a match fails the step without a word, as a step that
-# fails silently would
-case "$f $*" in ${STUB_FAIL:-//}) exit 1 ;; esac
+# STUB_FAIL: a glob over "<step> <args>"; a match fails the step, with STUB_FAIL_STATUS (default
+# 1), printing STUB_SAY if set and otherwise nothing, as a step that fails silently would
+case "$f $*" in ${STUB_FAIL:-//}) [ -z "${STUB_SAY:-}" ] || echo "$STUB_SAY"; exit "${STUB_FAIL_STATUS:-1}" ;; esac
 newid() { od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; }
 case "$f $1" in
   "key.sh --prepared") echo pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp ;;
@@ -307,13 +307,30 @@ MVM_CACHE_AFTER_PREPARE=true||image.sh pull p*|pulling the prepared image
 MVM_CACHE_AFTER_PREPARE=false||image.sh pull l*|pulling the layer image
 MVM_CACHE_AFTER_PREPARE=false||image.sh pull k*|pulling the base image
 MVM_CACHE_AFTER_PREPARE=false|base|build.sh *|building the base image
-MVM_CACHE_AFTER_PREPARE=false|layer|layer.sh *|building the layer image
+STUB_FAIL_STATUS=2|layer|layer.sh *|building the layer image
 MVM_CACHE_AFTER_PREPARE=false|base|image.sh push k*|pushing the base image
 MVM_CACHE_AFTER_PREPARE=false|layer|image.sh push l*|pushing the layer image
-MVM_CACHE_AFTER_PREPARE=false||boot.sh */layer|booting the layer image
-MVM_CACHE_AFTER_PREPARE=true||snapshot.sh *|snapshotting the prepared image
 MVM_CACHE_AFTER_PREPARE=true||image.sh push p*|pushing the prepared image
-MVM_CACHE_AFTER_PREPARE=true||boot.sh */prepared|booting the prepared image
+TABLE
+}
+
+# spec: one ::error per failure (task 3 review): space.sh, layer.sh (when it exits 1), boot.sh and
+#       snapshot.sh name the image and the step themselves, so main.sh adds nothing
+@test "a step that names its own failure is named once" {
+    while IFS='|' read -r env drops fail; do
+        rm -rf "$STORE"; seed base; seed layer; drop $drops; : > "$CALLS"
+        run env $env STUB_FAIL="$fail" STUB_SAY='::error title=mavericks-vm::the step named it' bash "$S/main.sh"
+        [ "$status" -ne 0 ] || { echo "$fail: status 0"; false; }
+        [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$fail: $output"; false; }
+    done <<'TABLE'
+MVM_CACHE_AFTER_PREPARE=false||space.sh hit
+MVM_CACHE_AFTER_PREPARE=false|base|space.sh miss
+MVM_CACHE_AFTER_PREPARE=false|layer|space.sh layer
+MVM_CACHE_AFTER_PREPARE=true||space.sh prepare
+MVM_CACHE_AFTER_PREPARE=false|layer|layer.sh *
+MVM_CACHE_AFTER_PREPARE=false||boot.sh */layer
+MVM_CACHE_AFTER_PREPARE=true||snapshot.sh *
+MVM_CACHE_AFTER_PREPARE=true||boot.sh */prepared
 TABLE
 }
 

@@ -106,6 +106,8 @@ X
     STUB_PACKER_FAIL=1 run layer "$BASE" "$LAYER"
     [ "$status" -eq 1 ]
     [[ "$output" == *"::error title=mavericks-vm::building the Aqua Transport layer"* ]] || false
+    # one ::error per failure: build.sh's own lines are plain
+    [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$output"; false; }
     [ ! -e "$MVM_DATA_DIR/layer-full" ]
     [ ! -e "$LAYER" ]
 }

@@ -55,8 +55,9 @@ trap 'finish $?' EXIT
 base=miss lyr=miss prep=miss
 key="" lkey="" pkey=""
 
-# spec: tests/main.bats -- every failure names its image (base, layer or prepared) and its step,
-#       even when the step itself failed without a word
+# spec: tests/main.bats -- every failure is named once, with its image (base, layer or prepared)
+#       and its step: by space.sh, layer.sh (exit 1), boot.sh and snapshot.sh themselves, and here
+#       for any other step, which fails without an ::error of its own
 die() { echo "::error title=mavericks-vm::$1 failed"; exit 1; }
 
 # spec: tests/main.bats -- a delta is bound to the bytes of the image under it, not to its key:
@@ -86,7 +87,8 @@ build_base() {
 }
 build_layer() {  # over the base in $box
   step space.sh layer || exit 1
-  step layer.sh "$box" "$layer" || die "building the layer image"
+  step layer.sh "$box" "$layer"; rc=$?
+  case "$rc" in 0) ;; 1) exit 1 ;; *) die "building the layer image" ;; esac
 }
 push() {  # $1 = base, layer or prepared; $2 = its key; $3 = its dir; $4 = miss or stale
   if [ "$4" = stale ]; then
@@ -149,9 +151,9 @@ prepared_hit=false; [ "$prep" != hit ] || prepared_hit=true
 echo "cache-after-prepare-hit=$prepared_hit" >> "${GITHUB_OUTPUT:-/dev/null}"
 
 if [ "$prepared_hit" = true ]; then
-  step boot.sh "$prepared" || die "booting the prepared image"
+  step boot.sh "$prepared" || exit 1
 else
-  step boot.sh "$layer" || die "booting the layer image"
+  step boot.sh "$layer" || exit 1
 fi
 step shell-wrapper.sh --install || exit 1
 if [ "${MVM_SYNC_TIME:-false}" = true ]; then
@@ -170,9 +172,9 @@ if [ -n "${MVM_PREPARE:-}" ] && [ "$prepared_hit" = false ]; then
     #       cache-after-prepare is one more encrypted image under the prepared key, a delta over
     #       the layer
     step space.sh prepare || exit 1
-    step snapshot.sh "$layer" "$prepared" || die "snapshotting the prepared image"
+    step snapshot.sh "$layer" "$prepared" || exit 1
     push prepared "$pkey" "$prepared" "$prep"
-    step boot.sh "$prepared" || die "booting the prepared image"
+    step boot.sh "$prepared" || exit 1
     step sync.sh in || exit 1
   fi
 fi

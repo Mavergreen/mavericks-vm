@@ -131,3 +131,17 @@ build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     grep -q " -var base_box=$BATS_TEST_TMPDIR/rel/base " "$STUB_LOG"
 }
+
+# spec: one ::error per failure, naming the image: build.sh builds the base for main.sh and the
+#       layer's full image for layer.sh, and each of those names what failed; build.sh's own lines
+#       are plain, so a failure is never annotated twice
+@test "a failed build or plugin install says why in plain lines, and leaves the ::error to its caller" {
+    STUB_PACKER_FAIL=1 run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"the host check refused"* ]] || false
+    [[ "$output" != *"::error"* ]] || false
+    STUB_PACKER_INSTALL_FAIL=1 run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"API rate limit exceeded"* ]] || false
+    [[ "$output" != *"::error"* ]] || false
+}

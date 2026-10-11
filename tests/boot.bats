@@ -11,7 +11,7 @@ setup() {
     export MVM_DATA_DIR="$BATS_TEST_TMPDIR/data" MVM_MEM=4096 MVM_CPU=2 \
         MVM_CPU_MODEL='Penryn,+ssse3,+sse4.1,+sse4.2' MVM_NAT='tcp:8080:80 udp:8081:80' \
         MVM_KVM=/dev/null MVM_SSH_TIMEOUT=2 MVM_SSH_INTERVAL=1
-    BOX="$BATS_TEST_TMPDIR/box"; mkdir -p "$BOX"
+    BOX="$BATS_TEST_TMPDIR/layer"; mkdir -p "$BOX"
     for f in box_0.img OVMF_CODE.fd OVMF_VARS.fd opencore.img; do : > "$BOX/$f"; done
 }
 
@@ -57,10 +57,39 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     STUB_QEMU_IMG_INFO_FAIL="qemu-img: Could not open '../box/box_0.img': No such file or directory" \
         STUB_SSH_UP=1 run boot "$BOX"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"::error title=mavericks-vm::the cached guest's backing chain is broken: qemu-img: Could not open '../box/box_0.img': No such file or directory"* ]] || false
+    [[ "$output" == *"::error title=mavericks-vm::booting the layer image: the cached guest's backing chain is broken: qemu-img: Could not open '../box/box_0.img': No such file or directory"* ]] || false
     [ ! -e "$STUB_QEMU_ARGV" ]
     run grep -q '^qemu-img create' "$STUB_LOG"
     [ "$status" -ne 0 ]
+}
+
+# spec: a workflow command is one line, so qemu-img's lines are joined as GitHub's annotations
+#       want them: % as %25, CR as %0D, LF as %0A (task 3 review, minor 3)
+@test "a broken chain's multi-line error is one annotation, its newlines encoded" {
+    STUB_QEMU_IMG_INFO_FAIL=$'qemu-img: first line\n50% of the second' run boot "$BOX"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"backing chain is broken: qemu-img: first line%0A50%25 of the second"* ]] || false
+    [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$output"; false; }
+    [[ "$output" != *$'\n50% of the second'* ]] || false
+}
+
+# spec: one ::error per failure, naming the image and the step; boot.sh names its own, so main.sh
+#       does not, and a failure boot.sh did not foresee is still named once
+@test "a failure boot.sh does not foresee is named once, with the image" {
+    fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
+    printf '#!/bin/bash\nexit 1\n' > "$fake/qemu-system-x86_64"; chmod +x "$fake/qemu-system-x86_64"
+    PATH="$fake:$PATH" STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -ne 0 ]
+    [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$output"; false; }
+    [[ "$output" == *"::error title=mavericks-vm::booting the layer image failed"* ]] || false
+}
+
+@test "the prepared image's boot is named for the prepared image" {
+    P="$BATS_TEST_TMPDIR/prepared"; mkdir -p "$P"
+    for f in box_0.img OVMF_CODE.fd OVMF_VARS.fd; do : > "$P/$f"; done
+    run boot "$P"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error title=mavericks-vm::booting the prepared image: the cached guest has no opencore.img"* ]] || false
 }
 
 @test "cpu-model reaches -cpu unchanged" {
@@ -129,7 +158,8 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
 @test "a runner without /dev/kvm is refused, by name" {
     MVM_KVM=/nonexistent run boot "$BOX"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"/nonexistent"* ]] || false
+    [[ "$output" == *"::error title=mavericks-vm::booting the layer image: /nonexistent"* ]] || false
+    [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$output"; false; }
 }
 
 @test "space: a data-dir with less room than needed is refused, naming both numbers" {
@@ -145,8 +175,20 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     MVM_SPACE_AVAILABLE_KIB=1048576 run bash "$REPO/scripts/space.sh" prepare
     [ "$status" -ne 0 ]
     [[ "$output" == *"prepare"* ]] || false
-    # the Aqua Transport layer's build is checked on its own
-    MVM_SPACE_AVAILABLE_KIB=1048576 run bash "$REPO/scripts/space.sh" layer
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"a cache layer needs"* ]] || false
+}
+
+# spec: one ::error per failure, naming the image and the step it was checked for (task 3 review,
+#       minor 2); main.sh adds none of its own
+@test "space: each check names the image and the step it makes room for" {
+    mkdir -p "$MVM_DATA_DIR"
+    while IFS='|' read -r what want; do
+        MVM_SPACE_AVAILABLE_KIB=1048576 run bash "$REPO/scripts/space.sh" "$what"
+        [ "$status" -eq 1 ]
+        [[ "$output" == "::error title=mavericks-vm::$want: $MVM_DATA_DIR has 1 GiB free"* ]] || { echo "$what: $output"; false; }
+    done <<'TABLE'
+hit|pulling the cached base, layer and prepared images
+miss|building the base image
+layer|building the layer image
+prepare|snapshotting the prepared image
+TABLE
 }

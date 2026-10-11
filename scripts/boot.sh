@@ -3,26 +3,38 @@
 #   usage: boot.sh <dir>     <dir> holds the box: box_0.img, OVMF_CODE.fd, OVMF_VARS.fd, opencore.img
 #          env in:  MVM_DATA_DIR, MVM_MEM, MVM_CPU, MVM_CPU_MODEL, MVM_NAT; MVM_KVM, MVM_SSH_PORT,
 #                   MVM_SSH_TIMEOUT, MVM_SSH_INTERVAL (defaults: /dev/kvm, 2222, 600, 5)
-#          out:     the guest running, and "ssh mavericks" reaching it
+#          out:     the guest running, and "ssh mavericks" reaching it; on failure, exit 1 after the
+#                   one ::error naming the image (<dir>'s name: layer, prepared; box is the base)
 set -euo pipefail
 
 [ $# -eq 1 ] || { echo "usage: boot.sh <dir>" >&2; exit 2; }
 box="$1"
+# spec: tests/boot.bats -- one ::error per failure, naming the image and the step; main.sh adds
+#       none, so a failure not foreseen here is named on the way out
+case "$(basename "$box")" in box) step="booting the base image" ;; *) step="booting the $(basename "$box") image" ;; esac
+named=false
+err() {  # $1 = what went wrong; a workflow command is one line, so % CR LF are encoded
+  local m="${1//'%'/%25}"; m="${m//$'\r'/%0D}"; m="${m//$'\n'/%0A}"
+  named=true
+  echo "::error title=mavericks-vm::$step: $m"
+}
+unforeseen() { local rc=$?; [ "$rc" -eq 0 ] || [ "$named" = true ] || echo "::error title=mavericks-vm::$step failed"; }
+trap unforeseen EXIT
 root="$(cd "$(dirname "$0")/.." && pwd)"
 data="${MVM_DATA_DIR:?boot.sh: MVM_DATA_DIR is unset}"
 kvm="${MVM_KVM:-/dev/kvm}"
 port="${MVM_SSH_PORT:-2222}"
 mkdir -p "$data"
 
-[ -w "$kvm" ] || { echo "::error title=mavericks-vm::$kvm is not writable: this runner cannot run KVM, and Mavericks under plain emulation is too slow to be worth waiting for"; exit 1; }
+[ -w "$kvm" ] || { err "$kvm is not writable: this runner cannot run KVM, and Mavericks under plain emulation is too slow to be worth waiting for"; exit 1; }
 for f in box_0.img OVMF_CODE.fd OVMF_VARS.fd opencore.img; do
-  [ -f "$box/$f" ] || { echo "::error title=mavericks-vm::the cached guest has no $f"; exit 1; }
+  [ -f "$box/$f" ] || { err "the cached guest has no $f"; exit 1; }
 done
 
 # spec: tests/boot.bats -- a layer or prepared image is a delta over the image below it; one whose
 #       chain has a missing link is refused here, before QEMU starts, rather than failing in the guest
 if ! chain="$(qemu-img info --backing-chain "$box/box_0.img" 2>&1)"; then
-  echo "::error title=mavericks-vm::the cached guest's backing chain is broken: $chain"
+  err "the cached guest's backing chain is broken: $chain"
   exit 1
 fi
 
@@ -87,7 +99,7 @@ start=$SECONDS
 #           bare "ssh mavericks" never found the host)
 until ssh -F "$HOME/.ssh/config" mavericks true 2>/dev/null; do
   if [ $((SECONDS - start)) -ge "$limit" ]; then
-    echo "::error title=mavericks-vm::the guest did not answer SSH within ${limit}s; the end of its serial log:"
+    err "the guest did not answer SSH within ${limit}s; the end of its serial log follows"
     tail -n 40 "$data/serial.log" 2>/dev/null || echo "(no serial log)"
     exit 1
   fi

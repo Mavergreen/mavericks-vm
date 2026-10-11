@@ -69,7 +69,6 @@ layer() { bash "$REPO/scripts/layer.sh" "$@"; }
     [[ "$output" == *"Images are identical"* ]] || false
 }
 
-# spec: a delta is bound to the bytes of the image under it; the ids say which image that is
 # spec: the real-qemu-img test above skips where there is no qemu-img; the release's unit tests
 #       install it, so there it runs
 @test "the release's unit tests install qemu-img, so the real-qemu-img delta test runs there" {
@@ -77,6 +76,7 @@ layer() { bash "$REPO/scripts/layer.sh" "$@"; }
         "$REPO/.github/workflows/release.yml"
 }
 
+# spec: a delta is bound to the bytes of the image under it; the ids say which image that is
 @test "the layer gets a fresh image-id, and the base's image-id as its backing-id" {
     run layer "$BASE" "$LAYER"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
@@ -133,7 +133,8 @@ base_state() { (cd "$BASE" && find . -printf '%p %y %s %m %T@\n' | sort; find . 
     cat > "$BATS_TEST_TMPDIR/qemu-img" <<'X'
 #!/bin/bash
 [ "$1" = create ] || exit 0
-while [ "$1" != -b ]; do shift; done
+while [ $# -gt 0 ] && [ "$1" != -b ]; do shift; done
+[ $# -ge 2 ] || { echo "fake qemu-img: create without -b <backing>" >&2; exit 1; }
 ls -A "$(dirname "$2")" > "$LISTING"
 exit 0
 X

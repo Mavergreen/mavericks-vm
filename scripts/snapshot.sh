@@ -10,11 +10,10 @@
 #                   on failure, exit 1 after the one ::error naming the prepared image
 set -euo pipefail
 
-[ $# -eq 2 ] || { echo "usage: snapshot.sh <box-dir> <out-dir>" >&2; exit 2; }
+[ $# -eq 2 ] || { echo "snapshot.sh: snapshotting the prepared image takes the layer's dir and the prepared dir; usage: snapshot.sh <box-dir> <out-dir>" >&2; exit 2; }
 box="$1"; out="$2"
-data="${MVM_DATA_DIR:?snapshot.sh: MVM_DATA_DIR is unset}"
 # spec: tests/snapshot.bats -- one ::error per failure, naming the image and the step; main.sh adds
-#       none, so a failure not foreseen here is named on the way out
+#       none, so a failure not foreseen here (the first being an unset data-dir) is named on the way out
 step="snapshotting the prepared image"
 named=false
 err() {  # $1 = what went wrong; a workflow command is one line, so % CR LF are encoded
@@ -24,6 +23,7 @@ err() {  # $1 = what went wrong; a workflow command is one line, so % CR LF are 
 }
 unforeseen() { local rc=$?; [ "$rc" -eq 0 ] || [ "$named" = true ] || echo "::error title=mavericks-vm::$step failed"; }
 trap unforeseen EXIT
+data="${MVM_DATA_DIR:?snapshot.sh: MVM_DATA_DIR is unset}"
 
 # spec: tests/snapshot.bats -- the delta is written from inside <out-dir>, where a relative
 #       data-dir would name an overlay that is not there

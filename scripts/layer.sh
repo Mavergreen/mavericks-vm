@@ -47,9 +47,12 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-fail() {  # $1 = what failed, for the log; the error line is always the same, naming the image
-  echo "::error title=mavericks-vm::building the Aqua Transport layer"
-  [ -z "${1:-}" ] || echo "layer.sh: $1" >&2
+fail() {  # $1 = what failed, if known; the one ::error names the image and the step, as the others do
+  if [ -n "${1:-}" ]; then
+    echo "::error title=mavericks-vm::building the layer image: $1"
+  else
+    echo "::error title=mavericks-vm::building the layer image failed"
+  fi
   exit 1
 }
 

@@ -86,3 +86,17 @@ setup() {
     [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$output"; false; }
     [[ "$output" == *"::error title=mavericks-vm::snapshotting the prepared image failed"* ]] || false
 }
+
+# spec: a failure before the EXIT trap was set exited without an ::error (task 3 re-review)
+@test "an unset data-dir fails with one ::error naming the prepared image" {
+    MVM_DATA_DIR= run bash "$REPO/scripts/snapshot.sh" "$BOX" "$BATS_TEST_TMPDIR/prepared"
+    [ "$status" -ne 0 ]
+    [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$output"; false; }
+    [[ "$output" == *"::error title=mavericks-vm::snapshotting the prepared image failed"* ]] || false
+}
+
+@test "a usage error names what snapshot.sh does" {
+    run bash "$REPO/scripts/snapshot.sh" "$BOX"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"snapshotting the prepared image"* ]] || false
+}

@@ -186,9 +186,15 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
         [ "$status" -eq 1 ]
         [[ "$output" == "::error title=mavericks-vm::$want: $MVM_DATA_DIR has 1 GiB free"* ]] || { echo "$what: $output"; false; }
     done <<'TABLE'
-hit|pulling the cached base, layer and prepared images
+hit|pulling the cached images
 miss|building the base image
 layer|building the layer image
 prepare|snapshotting the prepared image
 TABLE
+}
+
+@test "a usage error names what boot.sh does" {
+    run boot
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"booting"* ]] || false
 }

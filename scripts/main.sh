@@ -70,8 +70,9 @@ finish() {
   #       leaves the disk when the step ends; a running QEMU keeps the files it has open, so later
   #       steps' ssh and custom shell still work (a composite action has no post step to do this)
   find "$box" "$layer" "$prepared" -mindepth 1 -delete 2>/dev/null || true
-  # spec: tests/safety.bats -- a cancelled job's SIGKILL skips layer.sh's own cleanup: the full
-  #       layer guest it decrypted, and build.sh's work dir (packer's output), go here too
+  # spec: tests/safety.bats -- defence in depth: layer.sh or build.sh killed on its own skips its own
+  #       cleanup, so the full layer guest it decrypted and build.sh's work dir (packer's output) go
+  #       here too (a SIGKILL of the whole step runs no cleanup at all, this one included)
   rm -rf "$data/layer-full" "$data/build" 2>/dev/null || true
   exit "$status"
 }

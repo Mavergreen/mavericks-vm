@@ -32,18 +32,18 @@ STUB
 }
 
 main() { bash "$S/main.sh"; }
-order() { grep -oE '^[a-z-]+\.sh( (pull|push|in|out|hit|miss|prepare|--install|--prepared))?' "$CALLS" | paste -sd' '; }
+order() { grep -oE '^[a-z-]+\.sh( (pull|push|in|out|hit|miss|prepare|--install|--prepared|--base))?' "$CALLS" | paste -sd' '; }
 
 @test "a hit: check room for a hit, pull, boot, prepare, run, copy back -- no build, no push" {
     run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    [ "$(order)" = "key.sh space.sh hit image.sh pull boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out" ]
+    [ "$(order)" = "key.sh --base space.sh hit image.sh pull boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out" ]
 }
 
 @test "a miss: room for a build, build, push, then as a hit" {
     STUB_PULL=3 run main
     [ "$status" -eq 0 ]
-    [ "$(order)" = "key.sh space.sh hit image.sh pull space.sh miss build.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out" ]
+    [ "$(order)" = "key.sh --base space.sh hit image.sh pull space.sh miss build.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out" ]
 }
 
 @test "a pull that errs (not a miss) fails the step and builds nothing" {
@@ -56,7 +56,7 @@ order() { grep -oE '^[a-z-]+\.sh( (pull|push|in|out|hit|miss|prepare|--install|-
 @test "disable-cache builds, and neither pulls nor pushes" {
     MVM_DISABLE_CACHE=true run main
     [ "$status" -eq 0 ]
-    [ "$(order)" = "key.sh space.sh miss build.sh boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out" ]
+    [ "$(order)" = "key.sh --base space.sh miss build.sh boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out" ]
 }
 
 @test "run's status is the step's, and the workspace still comes back" {
@@ -81,7 +81,7 @@ order() { grep -oE '^[a-z-]+\.sh( (pull|push|in|out|hit|miss|prepare|--install|-
 @test "cache-after-prepare, miss: prepare, snapshot, push the prepared key, boot it, run" {
     MVM_CACHE_AFTER_PREPARE=true run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    [ "$(order)" = "key.sh --prepared space.sh hit image.sh pull key.sh image.sh pull boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh image.sh push boot.sh sync.sh in run.sh sync.sh out" ]
+    [ "$(order)" = "key.sh --prepared space.sh hit image.sh pull key.sh --base image.sh pull boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh image.sh push boot.sh sync.sh in run.sh sync.sh out" ]
     grep -qxF 'cache-after-prepare-hit=false' "$GITHUB_OUTPUT"
 }
 

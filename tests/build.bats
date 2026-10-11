@@ -25,6 +25,20 @@ build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
     grep -qxF "curl https://github.com/Mavergreen/packer-plugin-macosx/releases/download/$PIN/packer-plugin-macosx_${PIN}_mavericks_template.zip" "$STUB_LOG"
 }
 
+# spec: every failure is bounded in time: a download that stalls fails instead of holding the job
+@test "the template download is bounded in time" {
+    run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q '^curl-args -fsSL --retry 3 --connect-timeout 20 --max-time 900 .*_mavericks_template.zip$' "$STUB_LOG" \
+        || { cat "$STUB_LOG"; false; }
+}
+
+@test "a failed template download exits 1 saying which download failed" {
+    STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/absent.zip" run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"build.sh: downloading packer-plugin-macosx_${PIN}_mavericks_template.zip failed"* ]] || { echo "$output"; false; }
+}
+
 @test "the plugin is installed at exactly the pinned version, before init" {
     run build "$BATS_TEST_TMPDIR/out"
     [ "$status" -eq 0 ]

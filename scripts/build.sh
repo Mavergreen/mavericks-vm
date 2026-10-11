@@ -30,8 +30,10 @@ work="$data/build"
 mkdir -p "$work" "${MVM_CACHE_DIR:?build.sh: MVM_CACHE_DIR is unset}"
 
 zip="packer-plugin-macosx_${pin}_${template}_template.zip"
-curl -fsSL --retry 3 -o "$work/$zip" \
-  "https://github.com/Mavergreen/packer-plugin-macosx/releases/download/$pin/$zip"
+# spec: tests/build.bats -- bounded in time, as every download is: a stalled one fails, by name
+curl -fsSL --retry 3 --connect-timeout 20 --max-time 900 -o "$work/$zip" \
+  "https://github.com/Mavergreen/packer-plugin-macosx/releases/download/$pin/$zip" \
+  || { echo "build.sh: downloading $zip failed"; exit 1; }
 (cd "$work" && unzip -q -o "$zip")
 tpl="$work/templates/$template"
 

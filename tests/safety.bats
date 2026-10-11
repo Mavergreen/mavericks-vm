@@ -44,6 +44,28 @@ STUB
     for d in box layer; do [ -d "$MVM_DATA_DIR/$d" ] && [ ! -e "$MVM_DATA_DIR/$d/box_0.img" ] || { echo "left: $d"; false; }; done
 }
 
+# spec: a cancelled job's SIGKILL skips layer.sh's own cleanup, and a killed build.sh leaves its work
+#       dir; the decrypted full layer guest and packer's output go when the step ends all the same
+@test "when the step ends, a layer build's leftovers are gone: layer-full and build" {
+    cat > "$S/layer.sh" <<'X'
+#!/bin/bash
+printf 'layer.sh %s\n' "$*" >> "$CALLS"
+mkdir -p "$MVM_DATA_DIR/layer-full" "$MVM_DATA_DIR/build/output" "$2"
+printf decrypted > "$MVM_DATA_DIR/layer-full/box_0.img"
+printf decrypted > "$MVM_DATA_DIR/build/output/mavericks.box"
+exit "$LAYER_RC"
+X
+    for rc in 0 1; do
+        mkdir -p "$MVM_DATA_DIR/box"  # the stub build.sh makes no box dir
+        LAYER_RC=$rc MVM_DISABLE_CACHE=true run bash "$S/main.sh"
+        [ "$status" -eq "$rc" ] || { echo "layer.sh exit $rc: main.sh exit $status: $output"; false; }
+        grep -q '^layer.sh ' "$CALLS"
+        for d in layer-full build; do
+            [ ! -e "$MVM_DATA_DIR/$d" ] || { echo "layer.sh exit $rc: left $d"; false; }
+        done
+    done
+}
+
 @test "debug-on-error prints the guest's system log when run fails" {
     MVM_RUN='fail' MVM_DEBUG_ON_ERROR=true run bash "$S/main.sh"
     [ "$status" -eq 7 ]

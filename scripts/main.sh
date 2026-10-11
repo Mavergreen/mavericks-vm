@@ -12,8 +12,9 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 data="${MVM_DATA_DIR:?main.sh: MVM_DATA_DIR is unset}"
-# siblings, so a delta's relative backing file resolves: the layer's ../box/box_0.img and the
-# prepared's ../layer/box_0.img
+# spec: tests/layer.bats "a base that is not the layer's sibling box is refused" -- siblings, so a
+#       delta's relative backing file resolves: the layer's ../box/box_0.img and the prepared's
+#       ../layer/box_0.img
 box="$data/box" layer="$data/layer" prepared="$data/prepared"
 mkdir -p "$data"
 step() { bash "$here/$1" "${@:2}"; }
@@ -78,8 +79,9 @@ finish() {
 }
 trap 'finish $?' EXIT
 
-# each image is hit (pulled, and bound to the image under it), miss (not in the store) or stale
-# (in the store, but thrown away: it is built again and pushed with --replace)
+# spec: tests/main.bats "a layer hit with a base miss" -- each image is hit (pulled, and bound to the
+#       image under it), miss (not in the store) or stale (in the store, but thrown away: it is
+#       built again and pushed with --replace)
 base=miss lyr=miss prep=miss
 key="" lkey="" pkey=""
 

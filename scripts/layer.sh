@@ -64,7 +64,8 @@ base_id="$(cat "$base/image-id" 2>/dev/null || true)"
 
 # spec: tests/layer.bats -- a full image left by an earlier run is not built over or beside
 rm -rf "$full" || fail "removing an earlier layer-full failed"
-# build.sh's own lines precede the error line
+# spec: tests/layer.bats -- one ::error per failure, so build.sh's own lines precede the error
+#       line and stay plain
 bash "$here/build.sh" mavericks-aquatransport "$full" "$base" || fail
 
 mkdir -p "$layer" || fail "making $layer failed"

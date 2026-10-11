@@ -22,7 +22,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          # one fetch of the plugin's base recipe, handed to both keys
+          # spec: tests/key.bats -- one fetch of the plugin's base recipe, handed to both keys
+          #       in MVM_BASE_RECIPE, so neither key fetches it around the other
           MVM_BASE_RECIPE="$(bash scripts/key.sh --recipe)"; export MVM_BASE_RECIPE
           keep_base="$(bash scripts/key.sh --base)"
           keep_layer="$(bash scripts/key.sh --layer)"

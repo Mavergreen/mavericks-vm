@@ -2,9 +2,11 @@
 # platform: GitHub's Linux runners only (bash, GNU coreutils, QEMU from apt) -- this Action runs nowhere else
 #   usage: layer.sh <base-dir> <layer-dir>
 #          env in:  MVM_DATA_DIR, MVM_CACHE_DIR (for build.sh)
-#          in:      <base-dir>, the unpacked base guest, which must be <layer-dir>/../box; never written
+#          in:      <base-dir>, the unpacked base guest with its image-id, which must be
+#                   <layer-dir>/../box; never written
 #          out:     <layer-dir> holding box_0.img, a qcow2 delta whose backing file is the literal
 #                   ../box/box_0.img, and the layer build's OVMF_CODE.fd, OVMF_VARS.fd, opencore.img;
+#                   image-id (fresh: 32 hex digits) and backing-id (the base's image-id);
 #                   on failure, nothing this run made (and an <layer-dir> must be absent or empty), no $MVM_DATA_DIR/layer-full, and exit 1
 set -euo pipefail
 
@@ -50,6 +52,12 @@ fail() {  # $1 = what failed, for the log; the error line is always the same, na
   exit 1
 }
 
+# spec: tests/layer.bats -- a delta is bound to the bytes of the image under it, not to its key:
+#       the layer records the base's image-id as its backing-id, and an id of its own for a
+#       prepared image to record; a base without one cannot be bound to, so nothing is built
+base_id="$(cat "$base/image-id" 2>/dev/null || true)"
+[[ "$base_id" =~ ^[0-9a-f]{32}$ ]] || fail "the base has no image-id in $base/image-id, so the layer cannot be bound to it"
+
 # spec: tests/layer.bats -- a full image left by an earlier run is not built over or beside
 rm -rf "$full"
 # build.sh's own lines precede the error line
@@ -63,5 +71,8 @@ for f in OVMF_CODE.fd OVMF_VARS.fd opencore.img; do
   cp "$full/$f" "$layer/$f" \
     || fail "copying $f failed"
 done
+layer_id="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')" || fail "making the layer's image-id failed"
+{ printf '%s\n' "$layer_id" > "$layer/image-id" && printf '%s\n' "$base_id" > "$layer/backing-id"; } \
+  || fail "writing the layer's image-id and backing-id failed"
 ok=true
 echo "layer.sh: the Aqua Transport layer is in $layer"

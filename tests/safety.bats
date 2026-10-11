@@ -16,7 +16,9 @@ setup() {
 printf '%s %s\n' "$f" "\$*" >> "\$CALLS"
 case "$f \$1" in
   "key.sh "*) echo kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ;;
-  "image.sh pull") mkdir -p "\$3" && printf decrypted > "\$3/box_0.img" ;;
+  # every image pulled is bound to the one under it: one id serves as image-id and backing-id
+  "image.sh pull") mkdir -p "\$3" && printf decrypted > "\$3/box_0.img" \
+                     && for i in image-id backing-id; do echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > "\$3/\$i"; done ;;
   "run.sh "*) grep -q fail "\$1" && exit 7; exit 0 ;;
 esac
 exit 0

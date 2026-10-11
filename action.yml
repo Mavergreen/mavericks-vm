@@ -119,24 +119,33 @@ runs:
       run: bash "$GITHUB_ACTION_PATH/scripts/dirs.sh"
 
     # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Two tiers" (in
-    #       packer-plugin-macosx) -- the repo tier keeps the encrypted guest in this repo's own
-    #       actions/cache, restored after the input check so a fork without a key never downloads it
-    - name: The cache key
+    #       packer-plugin-macosx) -- the repo tier keeps the encrypted base, layer and prepared
+    #       images together in this repo's own actions/cache, restored after the input check so a
+    #       fork without a key never downloads them; main.sh prunes the blob dir to this run's
+    #       three keys, so it is one base plus deltas. Not run with the cache disabled, when main.sh
+    #       computes no keys, nor in the registry tier.
+    - name: The cache keys
       id: key
+      if: env.MVM_STORE == 'file' && env.MVM_DISABLE_CACHE != 'true'
       shell: bash
       env:
         MVM_PREPARE: ${{ inputs.prepare }}
       run: |
-        if [ "$MVM_CACHE_AFTER_PREPARE" = true ] && [ -n "$MVM_PREPARE" ]; then k="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --prepared)"; else k="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --base)"; fi
-        { echo "key=$k"; echo "blob=$MVM_BLOB_DIR/$k.tar.zst.age"; } >> "$GITHUB_OUTPUT"
+        base="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --base)"
+        layer="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --layer)"
+        top="$layer"
+        if [ "$MVM_CACHE_AFTER_PREPARE" = true ] && [ -n "$MVM_PREPARE" ]; then top="$(bash "$GITHUB_ACTION_PATH/scripts/key.sh" --prepared)"; fi
+        { echo "base=$base"; echo "layer=$layer"; echo "top=$top"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore this repo's cached guest
       if: env.MVM_STORE == 'file' && env.MVM_DISABLE_CACHE != 'true'
       uses: actions/cache/restore@v6.1.0
       with:
-        path: ${{ steps.key.outputs.blob }}
-        key: mavericks-vm-${{ steps.key.outputs.key }}
-        restore-keys: mavericks-vm-${{ steps.key.outputs.key }}-
+        path: ${{ env.MVM_BLOB_DIR }}
+        key: mavericks-vm-${{ steps.key.outputs.base }}-${{ steps.key.outputs.top }}
+        restore-keys: |
+          mavericks-vm-${{ steps.key.outputs.base }}-${{ steps.key.outputs.top }}-
+          mavericks-vm-${{ steps.key.outputs.base }}-
 
     - name: Install QEMU, age, oras and packer
       shell: bash
@@ -161,5 +170,5 @@ runs:
       if: always() && steps.main.outputs.cache-save-key != ''
       uses: actions/cache/save@v6.1.0
       with:
-        path: ${{ env.MVM_BLOB_DIR }}/${{ steps.main.outputs.cache-save-key }}.tar.zst.age
-        key: mavericks-vm-${{ steps.main.outputs.cache-save-key }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ env.MVM_BLOB_DIR }}
+        key: mavericks-vm-${{ steps.key.outputs.base }}-${{ steps.key.outputs.top }}-${{ github.run_id }}-${{ github.run_attempt }}

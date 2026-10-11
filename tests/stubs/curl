@@ -1,5 +1,6 @@
 #!/bin/bash
-# A stand-in curl: serves $STUB_TEMPLATE_ZIP for any URL, recording it in $STUB_LOG (and the
+# A stand-in curl: serves $STUB_TEMPLATE_ZIP for any URL (but $STUB_BASE_RECIPE, or a 22, for a
+# base-recipe asset), recording it in $STUB_LOG (and the
 # whole argv on a curl-args line).
 printf 'curl-args %s\n' "$*" >> "$STUB_LOG"
 out=""; url=""
@@ -11,4 +12,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 printf 'curl %s\n' "$url" >> "$STUB_LOG"
+case "$url" in
+  *_mavericks_base_recipe.txt)
+    [ -n "${STUB_BASE_RECIPE:-}" ] || exit 22
+    if [ -n "$out" ]; then printf '%s\n' "$STUB_BASE_RECIPE" > "$out"; else printf '%s\n' "$STUB_BASE_RECIPE"; fi
+    exit 0 ;;
+esac
 cp "$STUB_TEMPLATE_ZIP" "$out"

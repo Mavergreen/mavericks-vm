@@ -82,11 +82,11 @@ if [ "${MVM_CACHE_AFTER_PREPARE:-false}" = true ] && [ "${MVM_DISABLE_CACHE:-fal
   step image.sh pull "$pkey" "$box"; rc=$?
   case "$rc" in
     0) prepared_hit=true ;;
-    3) key="$(step key.sh)" || exit 1; get_base checked ;;
+    3) key="$(step key.sh --base)" || exit 1; get_base checked ;;
     *) exit 1 ;;
   esac
 else
-  key="$(step key.sh)" || exit 1
+  key="$(step key.sh --base)" || exit 1
   get_base
 fi
 echo "cache-after-prepare-hit=$prepared_hit" >> "${GITHUB_OUTPUT:-/dev/null}"

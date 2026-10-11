@@ -11,44 +11,111 @@ setup() {
     printf 'updates = "security"\nsmbios = "iMac14,2"\nuser = "vagrant"\n' > "$ROOT/box.pkrvars.hcl"
     printf '1\n' > "$ROOT/scripts/guest-recipe"
     export MVM_ROOT="$ROOT"
+    export PATH="$REPO/tests/stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
+    : > "$STUB_LOG"
+    export STUB_BASE_RECIPE="$(printf 'a%.0s' {1..64})"
     unset MVM_PREPARE MVM_CACHE_AFTER_PREPARE_SUFFIX
 }
 
 key() { bash "$REPO/scripts/key.sh" "$@"; }
 
 @test "the key is 64 hex digits, and the same inputs give the same key" {
-    run key
+    run key --base
     [ "$status" -eq 0 ]
     [[ "$output" =~ ^[0-9a-f]{64}$ ]] || false
     first="$output"
-    run key
+    run key --base
     [ "$output" = "$first" ]
 }
 
-@test "the key moves with the plugin release, each box setting and the guest recipe" {
-    base="$(key)"
-    printf 'v0.20261005.3\n' > "$ROOT/components/packer-plugin-macosx/version"
-    [ "$(key)" != "$base" ]
-    printf 'v0.20261005.2\n' > "$ROOT/components/packer-plugin-macosx/version"
-    [ "$(key)" = "$base" ]
+@test "the base key moves with each box setting, the guest recipe and the base recipe" {
+    base="$(key --base)"
     for change in 's/security/none/' 's/iMac14,2/MacPro5,1/' 's/vagrant/builder/'; do
         cp "$ROOT/box.pkrvars.hcl" "$BATS_TEST_TMPDIR/vars.bak"
         sed -i "$change" "$ROOT/box.pkrvars.hcl"
-        [ "$(key)" != "$base" ] || { echo "unmoved by $change"; false; }
+        [ "$(key --base)" != "$base" ] || { echo "unmoved by $change"; false; }
         cp "$BATS_TEST_TMPDIR/vars.bak" "$ROOT/box.pkrvars.hcl"
     done
+    [ "$(key --base)" = "$base" ]
     printf '2\n' > "$ROOT/scripts/guest-recipe"
-    [ "$(key)" != "$base" ]
+    [ "$(key --base)" != "$base" ]
+}
+
+@test "the base key does not move when only the plugin version moves and its base recipe does not" {
+    base="$(key --base)"
+    printf 'v0.20261005.3\n' > "$ROOT/components/packer-plugin-macosx/version"
+    [ "$(key --base)" = "$base" ]
+}
+
+@test "the base key moves when the base recipe moves" {
+    base="$(key --base)"
+    STUB_BASE_RECIPE="$(printf 'b%.0s' {1..64})" run key --base
+    [ "$status" -eq 0 ]
+    [ "$output" != "$base" ]
+}
+
+@test "the base recipe is fetched from the pinned release's asset, with a bounded curl" {
+    key --base
+    grep -qxF 'curl https://github.com/Mavergreen/packer-plugin-macosx/releases/download/v0.20261005.2/packer-plugin-macosx_v0.20261005.2_mavericks_base_recipe.txt' "$STUB_LOG"
+    grep -q 'curl-args -fsSL --retry 3 --max-time 60 ' "$STUB_LOG"
+}
+
+@test "the layer key moves when the plugin version moves" {
+    layer="$(key --layer)"
+    [[ "$layer" =~ ^[0-9a-f]{64}$ ]] || false
+    [ "$layer" != "$(key --base)" ]
+    printf 'v0.20261005.3\n' > "$ROOT/components/packer-plugin-macosx/version"
+    [ "$(key --layer)" != "$layer" ]
+    printf 'v0.20261005.2\n' > "$ROOT/components/packer-plugin-macosx/version"
+    [ "$(key --layer)" = "$layer" ]
+}
+
+@test "the layer key moves when the base key moves" {
+    layer="$(key --layer)"
+    printf '2\n' > "$ROOT/scripts/guest-recipe"
+    [ "$(key --layer)" != "$layer" ]
+}
+
+@test "a missing base-recipe asset fails, naming the release and the asset, and never falls back" {
+    STUB_BASE_RECIPE= run key --base
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"v0.20261005.2"* ]] || false
+    [[ "$output" == *"packer-plugin-macosx_v0.20261005.2_mavericks_base_recipe.txt"* ]] || false
+    [[ ! "$output" =~ ^[0-9a-f]{64}$ ]] || false
+}
+
+@test "a recipe that is not 64 hex digits fails" {
+    for bad in abc "$(printf 'A%.0s' {1..64})" "$(printf 'a%.0s' {1..63})" "$(printf 'a%.0s' {1..65})" "$(printf 'g%.0s' {1..64})"; do
+        STUB_BASE_RECIPE="$bad" run key --base
+        [ "$status" -ne 0 ] || { echo "accepted: $bad"; false; }
+        [[ "$output" == *"mavericks_base_recipe.txt"* ]] || false
+    done
+}
+
+@test "no flag is a usage error" {
+    run key
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"usage"* ]] || false
+    run key --bogus
+    [ "$status" -eq 2 ]
+}
+
+@test "the prepared key moves when the layer key moves" {
+    MVM_PREPARE='echo one' run key --prepared
+    p1="$output"
+    printf 'v0.20261005.3\n' > "$ROOT/components/packer-plugin-macosx/version"
+    MVM_PREPARE='echo one' run key --prepared
+    [ "$output" != "$p1" ]
 }
 
 @test "runtime inputs do not move the key: they reuse the same guest" {
-    base="$(key)"
-    run env MVM_MEM=8192 MVM_CPU=4 MVM_CPU_MODEL=Nehalem MVM_NAT='tcp:8080:80' MVM_SYNC=scp bash "$REPO/scripts/key.sh"
+    base="$(key --base)"
+    run env MVM_MEM=8192 MVM_CPU=4 MVM_CPU_MODEL=Nehalem MVM_NAT='tcp:8080:80' MVM_SYNC=scp bash "$REPO/scripts/key.sh" --base
     [ "$output" = "$base" ]
 }
 
-@test "the prepared key differs from the base, and moves with prepare and the suffix" {
-    base="$(key)"
+@test "the prepared key differs from the layer, and moves with prepare and the suffix" {
+    base="$(key --layer)"
     MVM_PREPARE='echo one' run key --prepared
     [ "$status" -eq 0 ]
     [[ "$output" =~ ^[0-9a-f]{64}$ ]] || false
@@ -75,13 +142,13 @@ key() { bash "$REPO/scripts/key.sh" "$@"; }
 
 @test "a missing or empty pin is an error, not a key" {
     : > "$ROOT/components/packer-plugin-macosx/version"
-    run key
+    run key --base
     [ "$status" -ne 0 ]
     [[ "$output" == *"packer-plugin-macosx"* ]] || false
 }
 
 @test "the repo's own box.pkrvars.hcl, guest recipe and pin exist and produce a key" {
-    MVM_ROOT="$REPO" run key
+    MVM_ROOT="$REPO" run key --base
     [ "$status" -eq 0 ]
     [[ "$output" =~ ^[0-9a-f]{64}$ ]] || false
 }

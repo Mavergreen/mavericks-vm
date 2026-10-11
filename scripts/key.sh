@@ -24,8 +24,10 @@ recipe="$(tr -d '[:space:]' < "$root/scripts/guest-recipe" 2>/dev/null || true)"
 # spec: tests/key.bats -- three keys, each from the one below it. The base follows the plugin's
 #       base recipe (a release asset: one line of 64 hex digits that moves only when what the base
 #       image is made of moves), the box settings the build is given and the guest recipe, so a plugin
-#       release that leaves the recipe alone keeps the base. The layer adds the plugin release itself.
-#       The prepared adds prepare. Runtime inputs (mem, cpu, nat, sync) are in none of them
+#       release that leaves the recipe alone keeps the base. The layer adds the plugin release itself
+#       and the layer recipe (scripts/layer-recipe, moved when the way this Action makes the layer
+#       changes, so the layer alone is made again). The prepared adds prepare. Runtime inputs (mem,
+#       cpu, nat, sync) are in none of them
 plugin_recipe() {
   # spec: tests/key.bats -- a caller that fetched the recipe once hands it on in MVM_BASE_RECIPE,
   #       and it must be the same one line of 64 hex digits
@@ -60,9 +62,15 @@ base_key() {
 }
 
 layer_key() {
-  local base
+  local base layer_recipe
+  layer_recipe="$(tr -d '[:space:]' < "$root/scripts/layer-recipe" 2>/dev/null || true)"
+  [ -n "$layer_recipe" ] || { echo "key.sh: no layer recipe in $root/scripts/layer-recipe" >&2; exit 1; }
   base="$(base_key)" || exit 1
-  { printf 'base=%s\n' "$base"; printf 'plugin=%s\n' "$pin"; } | sha256sum | cut -d' ' -f1
+  {
+    printf 'base=%s\n' "$base"
+    printf 'plugin=%s\n' "$pin"
+    printf 'layer-recipe=%s\n' "$layer_recipe"
+  } | sha256sum | cut -d' ' -f1
 }
 
 prepared_key() {

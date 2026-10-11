@@ -2,7 +2,7 @@ name: warmer
 
 # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "A miss" (in packer-plugin-macosx)
 #       -- build and push the cached guest when its key is new (a plugin bump, the box settings, the
-#       guest recipe), and weekly, so consumers usually hit
+#       guest recipe, the layer recipe), and weekly, so consumers usually hit
 on:
   push:
     branches: [main]
@@ -10,6 +10,7 @@ on:
       - components/packer-plugin-macosx/version
       - box.pkrvars.hcl
       - scripts/guest-recipe
+      - scripts/layer-recipe
   schedule:
     - cron: '17 6 * * 1'
   workflow_dispatch:

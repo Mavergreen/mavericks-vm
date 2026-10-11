@@ -10,6 +10,7 @@ setup() {
     printf 'v0.20261005.2\n' > "$ROOT/components/packer-plugin-macosx/version"
     printf 'updates = "security"\nsmbios = "iMac14,2"\nuser = "vagrant"\n' > "$ROOT/box.pkrvars.hcl"
     printf '1\n' > "$ROOT/scripts/guest-recipe"
+    printf '1\n' > "$ROOT/scripts/layer-recipe"
     export MVM_ROOT="$ROOT"
     export PATH="$REPO/tests/stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
     : > "$STUB_LOG"
@@ -74,6 +75,38 @@ key() { bash "$REPO/scripts/key.sh" "$@"; }
     layer="$(key --layer)"
     printf '2\n' > "$ROOT/scripts/guest-recipe"
     [ "$(key --layer)" != "$layer" ]
+}
+
+# spec: the layer recipe is this repo's lever on the layer alone: moved when the way this Action
+#       makes the layer changes, it makes the layer again over the cached base
+@test "the layer key moves when the layer recipe moves, and the base key does not" {
+    base="$(key --base)" layer="$(key --layer)"
+    MVM_PREPARE='echo one' run key --prepared
+    prepared="$output"
+    printf '2\n' > "$ROOT/scripts/layer-recipe"
+    [ "$(key --layer)" != "$layer" ] || { echo "the layer key ignores the layer recipe"; false; }
+    [ "$(key --base)" = "$base" ] || { echo "the base key moved with the layer recipe"; false; }
+    MVM_PREPARE='echo one' run key --prepared
+    [ "$output" != "$prepared" ]
+}
+
+@test "a missing or empty layer recipe fails the layer and prepared keys, naming the file" {
+    for content in absent ''; do
+        if [ "$content" = absent ]; then rm -f "$ROOT/scripts/layer-recipe"; else printf ' \n' > "$ROOT/scripts/layer-recipe"; fi
+        for m in --layer --prepared; do
+            MVM_PREPARE=x run key $m
+            [ "$status" -ne 0 ] || { echo "$m ($content): status 0: $output"; false; }
+            [[ "$output" == *"no layer recipe in $ROOT/scripts/layer-recipe"* ]] || { echo "$output"; false; }
+        done
+    done
+}
+
+# spec: the warmer builds the cached guest when its key moves, so it runs on a push that moves any
+#       of the repo's files the keys are made of
+@test "the warmer runs on a push to any file the keys are made of" {
+    for f in components/packer-plugin-macosx/version box.pkrvars.hcl scripts/guest-recipe scripts/layer-recipe; do
+        grep -qxF "      - $f" "$REPO/.github/workflows/warmer.yml" || { echo "warmer.yml misses $f"; false; }
+    done
 }
 
 @test "a missing base-recipe asset fails, naming the release and the asset, and never falls back" {
@@ -198,8 +231,11 @@ $(printf 'a%.0s' {1..32})" run key --base
     [[ "$output" == *"packer-plugin-macosx"* ]] || false
 }
 
-@test "the repo's own box.pkrvars.hcl, guest recipe and pin exist and produce a key" {
+@test "the repo's own box.pkrvars.hcl, guest recipe, layer recipe and pin exist and produce keys" {
     MVM_ROOT="$REPO" run key --base
     [ "$status" -eq 0 ]
+    [[ "$output" =~ ^[0-9a-f]{64}$ ]] || false
+    MVM_ROOT="$REPO" run key --layer
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
     [[ "$output" =~ ^[0-9a-f]{64}$ ]] || false
 }

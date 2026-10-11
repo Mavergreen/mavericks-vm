@@ -16,7 +16,7 @@ avail_gib=$((avail_kib / 1024 / 1024))
 # spec: tests/boot.bats -- each failure names its image and its step, here and nowhere else
 case "$1" in
   hit) what="pulling the cached images" ;;
-  miss) what="building the base image" ;;
+  miss) what="building the base image and the layer over it" ;;
   layer) what="building the layer image" ;;
   prepare) what="snapshotting the prepared image" ;;
 esac

@@ -187,7 +187,7 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
         [[ "$output" == "::error title=mavericks-vm::$want: $MVM_DATA_DIR has 1 GiB free"* ]] || { echo "$what: $output"; false; }
     done <<'TABLE'
 hit|pulling the cached images
-miss|building the base image
+miss|building the base image and the layer over it
 layer|building the layer image
 prepare|snapshotting the prepared image
 TABLE

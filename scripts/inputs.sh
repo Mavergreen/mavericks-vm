@@ -101,6 +101,10 @@ esac
 data_dir="${MVM_IN_DATA_DIR:-/mnt/mavericks-vm}"
 cache_dir="${MVM_IN_CACHE_DIR:-$data_dir/cache}"
 case "$data_dir$cache_dir" in *[[:space:]]*) die "data-dir and cache-dir may not contain whitespace" ;; esac
+# spec: tests/inputs.bats -- the scripts change directory (packer runs in the template's dir, the
+#       deltas are written from their own), so a relative directory would name a different place in each
+case "$data_dir" in /*) ;; *) die "data-dir: want an absolute path (got '$data_dir')" ;; esac
+case "$cache_dir" in /*) ;; *) die "cache-dir: want an absolute path (got '$cache_dir')" ;; esac
 
 # spec: tests/inputs.bats -- usesh is accepted and ignored, as vmactions does; it writes nothing
 {

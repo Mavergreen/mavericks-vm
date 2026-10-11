@@ -198,6 +198,24 @@ EOF
     env_has MVM_CACHE_DIR=/mnt/mavericks-vm/cache
 }
 
+# spec: build.sh runs packer from the template's dir and layer.sh writes a delta in its own dir, so a
+#       relative directory would name a different place in each; it is refused, by name
+@test "a relative data-dir or cache-dir is refused, by name, writing nothing" {
+    for v in mavericks-vm ./mavericks-vm ../mnt; do
+        MVM_IN_DATA_DIR="$v" run inputs
+        [ "$status" -eq 1 ] || { echo "data-dir $v: status $status"; false; }
+        [[ "$output" == "::error title=mavericks-vm::data-dir: want an absolute path (got '$v')" ]] || { echo "$output"; false; }
+        MVM_IN_CACHE_DIR="$v" run inputs
+        [ "$status" -eq 1 ] || { echo "cache-dir $v: status $status"; false; }
+        [[ "$output" == "::error title=mavericks-vm::cache-dir: want an absolute path (got '$v')" ]] || { echo "$output"; false; }
+    done
+    [ ! -s "$GITHUB_ENV" ]
+    MVM_IN_DATA_DIR=/data/mvm run inputs
+    [ "$status" -eq 0 ]
+    env_has MVM_DATA_DIR=/data/mvm
+    env_has MVM_CACHE_DIR=/data/mvm/cache
+}
+
 @test "cache-store auto shares the registry for Mavergreen's repos, and keeps a repo's own cache for anyone else's" {
     run inputs
     env_has MVM_STORE=registry

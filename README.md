@@ -90,6 +90,19 @@ Plus four more:
 
 After the step, `ssh mavericks` reaches the guest from later steps.
 
+## What's in the guest
+
+Mac OS X 10.9.5, plus [Mavericks Forever](https://mavericksforever.com)'s Aqua Transport:
+the guest's `/usr/bin/curl`, and anything else that uses Secure Transport,
+can reach modern HTTPS sites such as github.com.
+
+Mavericks Forever replaces its Aqua Transport download in place,
+and each packer-plugin-macosx release pins one version of it, with no fallback.
+Once the download has moved past the pinned version,
+building the guest anew fails, naming both checksums (pinned and served),
+until a plugin release pins the new one.
+An already cached guest keeps working.
+
 ## What it can't do
 
 - `sync: sshfs` or `nfs`

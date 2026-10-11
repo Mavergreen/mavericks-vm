@@ -198,7 +198,7 @@ echo "cache-after-prepare-hit=$prepared_hit" >> "${GITHUB_OUTPUT:-/dev/null}"
 if [ "$prepared_hit" = true ]; then
   step boot.sh "$prepared" || exit 1
 else
-  step boot.sh "$layer" || exit 1
+  step boot.sh "$box" || exit 1
 fi
 step shell-wrapper.sh --install || exit 1
 if [ "${MVM_SYNC_TIME:-false}" = true ]; then

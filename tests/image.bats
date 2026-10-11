@@ -53,10 +53,12 @@ image() { bash "$REPO/scripts/image.sh" "$@"; }
     [ -z "$(ls -A "$out" 2>/dev/null)" ]
 }
 
-@test "a push to a key that already exists is skipped, and says so" {
+# spec: a skipped push exits 4, so main.sh knows the image under the key is not the one it built,
+#       and caches nothing it made over that one (task 3 re-review, minor 1)
+@test "a push to a key that already exists is skipped, says so, and exits 4" {
     mkdir -p "$STUB_REGISTRY/$K"; printf 'theirs\n' > "$STUB_REGISTRY/$K/blob"
     run image push "$K" "$BOX"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 4 ]
     [[ "$output" == *"already"* ]] || false
     [ "$(cat "$STUB_REGISTRY/$K/blob")" = theirs ]
 }
@@ -183,11 +185,11 @@ image() { bash "$REPO/scripts/image.sh" "$@"; }
     diff -r "$BOX" "$BATS_TEST_TMPDIR/out"
 }
 
-@test "file store: a push to a key that already has a blob is skipped, and says so" {
+@test "file store: a push to a key that already has a blob is skipped, says so, and exits 4" {
     export MVM_STORE=file MVM_BLOB_DIR="$BATS_TEST_TMPDIR/blob"
     mkdir -p "$MVM_BLOB_DIR"; printf 'theirs\n' > "$MVM_BLOB_DIR/$K.tar.zst.age"
     run image push "$K" "$BOX"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 4 ]
     [[ "$output" == *"already"* ]] || false
     [ "$(cat "$MVM_BLOB_DIR/$K.tar.zst.age")" = theirs ]
 }
@@ -201,4 +203,23 @@ image() { bash "$REPO/scripts/image.sh" "$@"; }
     run image pull "$K" "$BATS_TEST_TMPDIR/out"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     diff -r "$BOX" "$BATS_TEST_TMPDIR/out"
+}
+
+@test "a guest that appears under the key while the push encrypts is kept, and the push exits 4" {
+    # an oras of this test's own: the first "is it there?" says no, and another run pushes just then
+    fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
+    cat > "$fake/oras" <<X
+#!/bin/bash
+if [ "\$1 \$2" = "manifest fetch" ] && [ ! -e "$BATS_TEST_TMPDIR/asked" ]; then
+    : > "$BATS_TEST_TMPDIR/asked"
+    mkdir -p "$STUB_REGISTRY/$K"; printf 'theirs\\n' > "$STUB_REGISTRY/$K/blob"
+    echo "Error: not found" >&2; exit 1
+fi
+exec "$REPO/tests/stubs/oras" "\$@"
+X
+    chmod +x "$fake/oras"
+    PATH="$fake:$PATH" run image push "$K" "$BOX"
+    [ "$status" -eq 4 ] || { echo "$output"; false; }
+    [[ "$output" == *"meanwhile"* ]] || false
+    [ "$(cat "$STUB_REGISTRY/$K/blob")" = theirs ]
 }

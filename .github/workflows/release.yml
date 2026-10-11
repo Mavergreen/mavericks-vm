@@ -41,8 +41,8 @@ jobs:
       - name: Install mavericks-shipyard
         uses: Mavergreen/shipyard/.github/actions/install@v1
 
-      - name: Install bats and shellcheck
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats shellcheck
+      - name: Install bats, shellcheck and qemu-img
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats shellcheck qemu-utils
 
       - name: Record the pre-build tree
         run: sh "$SHIPYARD_SCRIPTS/assert-tree-clean.sh" --record

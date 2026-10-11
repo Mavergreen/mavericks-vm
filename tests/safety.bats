@@ -121,8 +121,9 @@ ok = ok and "env.MVM_STORE == 'file'" in steps[r].get("if", "")
 # spec: tests/image.bats -- a guest that will not decrypt (the key changed) is rebuilt and saved
 #       under a newer name; restore takes the newest by prefix, never an exact name
 rw, ww = steps[r].get("with", {}), steps[w].get("with", {})
-ok = ok and rw.get("restore-keys", "").strip() == "mavericks-vm-${{ steps.key.outputs.key }}-"
-ok = ok and ww.get("key", "").startswith("mavericks-vm-${{ steps.main.outputs.cache-save-key }}-${{ github.run_id }}")
+# (tests/main.bats holds the full key and path table)
+ok = ok and rw.get("restore-keys", "").splitlines()[0].endswith("${{ steps.key.outputs.top }}-")
+ok = ok and ww.get("key", "").endswith("-${{ github.run_id }}-${{ github.run_attempt }}")
 print(names, steps[w].get("if"))
 sys.exit(0 if ok else 1)
 PY

@@ -19,9 +19,9 @@ printf '%s %s\n' "$f" "$*" >> "$CALLS"
 case "$f $*" in ${STUB_FAIL:-//}) [ -z "${STUB_SAY:-}" ] || echo "$STUB_SAY"; exit "${STUB_FAIL_STATUS:-1}" ;; esac
 newid() { od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; }
 case "$f $1" in
-  "key.sh --prepared") echo pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp ;;
-  "key.sh --layer") echo llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll ;;
-  "key.sh "*) echo kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ;;
+  "key.sh --prepared") echo 3333333333333333333333333333333333333333333333333333333333333333 ;;
+  "key.sh --layer") echo 2222222222222222222222222222222222222222222222222222222222222222 ;;
+  "key.sh "*) echo 1111111111111111111111111111111111111111111111111111111111111111 ;;
   # the store keeps what is pushed under its key; a push is skipped when the key is there,
   # unless --replace, as image.sh does
   "image.sh pull")
@@ -77,9 +77,9 @@ STUB
     seed base; seed layer
 }
 
-K=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
-L=llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll
-P=pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp
+K=1111111111111111111111111111111111111111111111111111111111111111
+L=2222222222222222222222222222222222222222222222222222222222222222
+P=3333333333333333333333333333333333333333333333333333333333333333
 A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb C=cccccccccccccccccccccccccccccccc
 dir_of() { case "$1" in base) echo "$STORE/$K" ;; layer) echo "$STORE/$L" ;; prepared) echo "$STORE/$P" ;; esac; }
 # a cached image: base (image-id A), layer (B, over A), prepared (C, over B)
@@ -105,11 +105,11 @@ bound() {
     [ ! -d "$(dir_of prepared)" ] || [ "$(id prepared backing-id)" = "$(id layer image-id)" ] || { echo "prepared not over layer"; false; }
 }
 
-HIT="key.sh --layer space.sh hit image.sh pull key.sh --base image.sh pull boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out"
-REBUILD_ALL="key.sh --layer space.sh hit image.sh pull key.sh --base image.sh pull space.sh miss build.sh image.sh push space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out"
-REBUILD_LAYER="key.sh --layer space.sh hit image.sh pull key.sh --base image.sh pull space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out"
-PREPARED_HIT="key.sh --prepared space.sh hit image.sh pull key.sh --layer image.sh pull key.sh --base image.sh pull boot.sh shell-wrapper.sh --install sync.sh in run.sh sync.sh out"
-PREPARE_AGAIN="key.sh --prepared space.sh hit image.sh pull key.sh --layer image.sh pull key.sh --base image.sh pull boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh image.sh push boot.sh sync.sh in run.sh sync.sh out"
+HIT="key.sh --layer key.sh --base space.sh hit image.sh pull image.sh pull boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out"
+REBUILD_ALL="key.sh --layer key.sh --base space.sh hit image.sh pull image.sh pull space.sh miss build.sh image.sh push space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out"
+REBUILD_LAYER="key.sh --layer key.sh --base space.sh hit image.sh pull image.sh pull space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out"
+PREPARED_HIT="key.sh --prepared key.sh --layer key.sh --base space.sh hit image.sh pull image.sh pull image.sh pull boot.sh shell-wrapper.sh --install sync.sh in run.sh sync.sh out"
+PREPARE_AGAIN="key.sh --prepared key.sh --layer key.sh --base space.sh hit image.sh pull image.sh pull image.sh pull boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh image.sh push boot.sh sync.sh in run.sh sync.sh out"
 
 @test "a layer hit: room for a hit, pull the layer and its base, boot the layer -- no build, no push" {
     run main
@@ -205,7 +205,7 @@ PREPARE_AGAIN="key.sh --prepared space.sh hit image.sh pull key.sh --layer image
     drop base layer
     STUB_RACE=$K MVM_STORE=file run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    [ "$(order)" = "key.sh --layer space.sh hit image.sh pull key.sh --base image.sh pull space.sh miss build.sh image.sh push space.sh layer layer.sh boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out" ]
+    [ "$(order)" = "key.sh --layer key.sh --base space.sh hit image.sh pull image.sh pull space.sh miss build.sh image.sh push space.sh layer layer.sh boot.sh shell-wrapper.sh --install sync.sh in run.sh run.sh sync.sh out" ]
     [ "$(pushes)" = "image.sh push $K box" ]
     [ "$(boots)" = "boot.sh layer" ]
     [ ! -d "$(dir_of layer)" ]
@@ -227,7 +227,7 @@ PREPARE_AGAIN="key.sh --prepared space.sh hit image.sh pull key.sh --layer image
     drop layer
     STUB_RACE=$L MVM_CACHE_AFTER_PREPARE=true run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    [ "$(order)" = "key.sh --prepared space.sh hit image.sh pull key.sh --layer image.sh pull key.sh --base image.sh pull space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh boot.sh sync.sh in run.sh sync.sh out" ]
+    [ "$(order)" = "key.sh --prepared key.sh --layer key.sh --base space.sh hit image.sh pull image.sh pull image.sh pull space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh boot.sh sync.sh in run.sh sync.sh out" ]
     [ "$(pushes)" = "image.sh push $L layer" ]
     [ "$(boots)" = "boot.sh layer boot.sh prepared" ]
     [ ! -d "$(dir_of prepared)" ]
@@ -289,7 +289,7 @@ PREPARE_AGAIN="key.sh --prepared space.sh hit image.sh pull key.sh --layer image
     seed prepared; drop layer
     MVM_CACHE_AFTER_PREPARE=true run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    [ "$(order)" = "key.sh --prepared space.sh hit image.sh pull key.sh --layer image.sh pull key.sh --base image.sh pull space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh image.sh push boot.sh sync.sh in run.sh sync.sh out" ]
+    [ "$(order)" = "key.sh --prepared key.sh --layer key.sh --base space.sh hit image.sh pull image.sh pull image.sh pull space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh image.sh push boot.sh sync.sh in run.sh sync.sh out" ]
     [ "$(boots)" = "boot.sh layer boot.sh prepared" ]
     [ "$(pushes)" = "image.sh push $L layer image.sh push --replace $P prepared" ]
     grep -qx 'layer: box' "$ROOM" || { cat "$ROOM"; false; }
@@ -301,7 +301,7 @@ PREPARE_AGAIN="key.sh --prepared space.sh hit image.sh pull key.sh --layer image
     seed prepared; drop base
     MVM_CACHE_AFTER_PREPARE=true run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    [ "$(order)" = "key.sh --prepared space.sh hit image.sh pull key.sh --layer image.sh pull key.sh --base image.sh pull space.sh miss build.sh image.sh push space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh image.sh push boot.sh sync.sh in run.sh sync.sh out" ]
+    [ "$(order)" = "key.sh --prepared key.sh --layer key.sh --base space.sh hit image.sh pull image.sh pull image.sh pull space.sh miss build.sh image.sh push space.sh layer layer.sh image.sh push boot.sh shell-wrapper.sh --install sync.sh in run.sh space.sh prepare snapshot.sh image.sh push boot.sh sync.sh in run.sh sync.sh out" ]
     [ "$(boots)" = "boot.sh layer boot.sh prepared" ]
     [ "$(pushes)" = "image.sh push $K box image.sh push --replace $L layer image.sh push --replace $P prepared" ]
     grep -qx 'miss:' "$ROOM" || { cat "$ROOM"; false; }
@@ -343,14 +343,14 @@ PREPARE_AGAIN="key.sh --prepared space.sh hit image.sh pull key.sh --layer image
 MVM_CACHE_AFTER_PREPARE=false||key.sh --layer|computing the layer image's key
 MVM_CACHE_AFTER_PREPARE=false||key.sh --base|computing the base image's key
 MVM_CACHE_AFTER_PREPARE=true||key.sh --prepared|computing the prepared image's key
-MVM_CACHE_AFTER_PREPARE=true||image.sh pull p*|pulling the prepared image
-MVM_CACHE_AFTER_PREPARE=false||image.sh pull l*|pulling the layer image
-MVM_CACHE_AFTER_PREPARE=false||image.sh pull k*|pulling the base image
+MVM_CACHE_AFTER_PREPARE=true||image.sh pull 3*|pulling the prepared image
+MVM_CACHE_AFTER_PREPARE=false||image.sh pull 2*|pulling the layer image
+MVM_CACHE_AFTER_PREPARE=false||image.sh pull 1*|pulling the base image
 MVM_CACHE_AFTER_PREPARE=false|base|build.sh *|building the base image
 STUB_FAIL_STATUS=2|layer|layer.sh *|building the layer image
-MVM_CACHE_AFTER_PREPARE=false|base|image.sh push k*|pushing the base image
-MVM_CACHE_AFTER_PREPARE=false|layer|image.sh push l*|pushing the layer image
-MVM_CACHE_AFTER_PREPARE=true||image.sh push p*|pushing the prepared image
+MVM_CACHE_AFTER_PREPARE=false|base|image.sh push 1*|pushing the base image
+MVM_CACHE_AFTER_PREPARE=false|layer|image.sh push 2*|pushing the layer image
+MVM_CACHE_AFTER_PREPARE=true||image.sh push 3*|pushing the prepared image
 TABLE
 }
 
@@ -379,11 +379,13 @@ TABLE
     [ "$(grep -c '^run.sh' "$CALLS")" = 1 ]
 }
 
-@test "repo store, miss: the step names the key it newly cached, for the save step" {
+# spec: the save step saves the whole blob dir under the base and top keys; the output only says
+#       something was stored, and names the top key
+@test "repo store, miss: the step names the top key (the layer's) once it has stored anything, for the save step" {
     drop base layer
     MVM_STORE=file run main
     [ "$status" -eq 0 ]
-    grep -qxF "cache-save-key=$K" "$GITHUB_OUTPUT"
+    grep -qxF "cache-save-key=$L" "$GITHUB_OUTPUT"
 }
 
 @test "repo store, hit: nothing new to save" {
@@ -396,19 +398,86 @@ TABLE
 # spec: the repo tier once skipped the base's push with cache-after-prepare on, keeping only the
 #       prepared guest; the prepared is now a delta over the layer, over the base, so every image
 #       this run builds is pushed and named
-@test "repo store, cache-after-prepare miss: base, layer and prepared are each pushed and named" {
+@test "repo store, cache-after-prepare miss: base, layer and prepared are each pushed, and the top key is named" {
     drop base layer
     MVM_STORE=file MVM_CACHE_AFTER_PREPARE=true run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     [ "$(pushes)" = "image.sh push $K box image.sh push $L layer image.sh push $P prepared" ]
-    for k in $K $L $P; do grep -qxF "cache-save-key=$k" "$GITHUB_OUTPUT"; done
+    grep -qxF "cache-save-key=$P" "$GITHUB_OUTPUT"
 }
 
 @test "a failing run still reports what it cached, so it is saved anyway" {
     drop base layer
     MVM_STORE=file MVM_RUN='fail' run main
     [ "$status" -eq 7 ]
-    grep -qxF "cache-save-key=$K" "$GITHUB_OUTPUT"
+    grep -qxF "cache-save-key=$L" "$GITHUB_OUTPUT"
+}
+
+# spec: a 40-minute base is not thrown away because the layer built over it failed
+@test "repo store: a base built before a failed layer build is still reported, so it is saved" {
+    drop base layer
+    MVM_STORE=file STUB_FAIL='layer.sh *' run main
+    [ "$status" -ne 0 ]
+    [ "$(pushes)" = "image.sh push $K box" ]
+    grep -qxF "cache-save-key=$L" "$GITHUB_OUTPUT"
+}
+
+@test "repo store: every push skipped because another run cached the key first names nothing to save" {
+    drop base layer
+    MVM_STORE=file STUB_RACE=$K run main
+    [ "$status" -eq 0 ]
+    run grep -q '^cache-save-key=.' "$GITHUB_OUTPUT"
+    [ "$status" -ne 0 ]
+}
+
+# spec: only this run's set is kept in the blob dir, so what the restore brought back that is no
+#       longer in the set (an old layer, an old prepared) is neither kept on disk nor saved; it is
+#       pruned as soon as the keys are known, before any pull or build, and only <64-hex>.tar.zst.age
+#       files are candidates
+prune_setup() {
+    export MVM_STORE=file MVM_BLOB_DIR="$BATS_TEST_TMPDIR/blob"
+    mkdir -p "$MVM_BLOB_DIR"
+    OLD1=$(printf '%64s' | tr ' ' d) OLD2=$(printf '%64s' | tr ' ' e)
+    for k in $K $L $OLD1 $OLD2; do echo x > "$MVM_BLOB_DIR/$k.tar.zst.age"; done
+    echo x > "$MVM_BLOB_DIR/notes.txt"; echo x > "$MVM_BLOB_DIR/${OLD1}0.tar.zst.age"; echo x > "$MVM_BLOB_DIR/${OLD1:1}.tar.zst.age"
+}
+@test "repo store: blobs that are none of this run's keys are deleted; this run's, and other files, are left" {
+    prune_setup
+    run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ -e "$MVM_BLOB_DIR/$K.tar.zst.age" ]
+    [ -e "$MVM_BLOB_DIR/$L.tar.zst.age" ]
+    [ ! -e "$MVM_BLOB_DIR/$OLD1.tar.zst.age" ]
+    [ ! -e "$MVM_BLOB_DIR/$OLD2.tar.zst.age" ]
+    [ -e "$MVM_BLOB_DIR/notes.txt" ]
+    [ -e "$MVM_BLOB_DIR/${OLD1}0.tar.zst.age" ]
+    [ -e "$MVM_BLOB_DIR/${OLD1:1}.tar.zst.age" ]
+}
+
+@test "repo store: the prepared key is in the set when cache-after-prepare is on" {
+    prune_setup
+    echo x > "$MVM_BLOB_DIR/$P.tar.zst.age"
+    MVM_CACHE_AFTER_PREPARE=true run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ -e "$MVM_BLOB_DIR/$P.tar.zst.age" ]
+    [ ! -e "$MVM_BLOB_DIR/$OLD1.tar.zst.age" ]
+}
+
+@test "repo store: a stale blob is gone before the first pull, even when the run then fails" {
+    prune_setup
+    STUB_FAIL='image.sh pull *' STUB_FAIL_STATUS=9 run main
+    [ "$status" -ne 0 ]
+    [ ! -e "$MVM_BLOB_DIR/$OLD1.tar.zst.age" ]
+}
+
+@test "the registry store and disable-cache prune nothing" {
+    prune_setup
+    MVM_STORE=registry run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ -e "$MVM_BLOB_DIR/$OLD1.tar.zst.age" ]
+    MVM_DISABLE_CACHE=true run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ -e "$MVM_BLOB_DIR/$OLD1.tar.zst.age" ]
 }
 
 # spec: on a miss the key was first parsed after the 40-minute build, at the push; a recipient or a
@@ -430,23 +499,69 @@ TABLE
     MVM_STORE=file MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='' run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     [ "$(pushes)" = "image.sh push $K box image.sh push $L layer" ]
-    grep -qxF "cache-save-key=$K" "$GITHUB_OUTPUT"
+    grep -qxF "cache-save-key=$L" "$GITHUB_OUTPUT"
     run grep -q 'key.sh --prepared' "$CALLS"
     [ "$status" -ne 0 ]
 }
 
-@test "action.yml's key step chooses the base key too when prepare is empty, so restore matches" {
-    run python3 - "$REPO/action.yml" "$BATS_TEST_TMPDIR/keystep.sh" <<'PY'
-import sys, yaml
+# spec: action.yml -- the repo tier restores and saves the whole blob dir: restored by the
+#       base-and-top key, else the base-and-top prefix, else the base prefix, and saved under a key
+#       no earlier save has used
+action_step() {  # $1 = a step's id or the start of its uses; writes it as JSON to step.json
+    python3 - "$REPO/action.yml" "$1" > "$BATS_TEST_TMPDIR/step.json" <<'PY'
+import sys, yaml, json
 steps = yaml.safe_load(open(sys.argv[1]))["runs"]["steps"]
-open(sys.argv[2], "w").write(next(s for s in steps if s.get("id") == "key")["run"])
+print(json.dumps(next(s for s in steps if s.get("id") == sys.argv[2] or s.get("uses", "").startswith(sys.argv[2]))))
 PY
+}
+field() {
+    python3 -c 'import sys, json; d = json.load(open(sys.argv[1]))
+for k in sys.argv[2:]: d = d[k]
+print(d)' "$BATS_TEST_TMPDIR/step.json" "$@"
+}
+key_step() {  # runs the key step, taken from step.json, in a scratch action dir
+    field run > "$BATS_TEST_TMPDIR/keystep.sh"
     mkdir -p "$BATS_TEST_TMPDIR/action/scripts"; cp "$S/key.sh" "$BATS_TEST_TMPDIR/action/scripts/"
     : > "$GITHUB_OUTPUT"
-    GITHUB_ACTION_PATH="$BATS_TEST_TMPDIR/action" MVM_BLOB_DIR=/b MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='' \
-        run bash -e "$BATS_TEST_TMPDIR/keystep.sh"
+    GITHUB_ACTION_PATH="$BATS_TEST_TMPDIR/action" MVM_BLOB_DIR=/b run bash -e "$BATS_TEST_TMPDIR/keystep.sh"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    grep -qxF "key=$K" "$GITHUB_OUTPUT"
+}
+
+@test "action.yml's key step outputs base, layer and top: the layer is top when prepare is empty" {
+    action_step key
+    MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='' key_step
+    grep -qxF "base=$K" "$GITHUB_OUTPUT" || false
+    grep -qxF "layer=$L" "$GITHUB_OUTPUT" || false
+    grep -qxF "top=$L" "$GITHUB_OUTPUT" || false
+}
+
+@test "action.yml's key step: top is the layer without cache-after-prepare, the prepared key with it" {
+    action_step key
+    MVM_CACHE_AFTER_PREPARE=false MVM_PREPARE='echo p' key_step
+    grep -qxF "top=$L" "$GITHUB_OUTPUT" || false
+    MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='echo p' key_step
+    grep -qxF "base=$K" "$GITHUB_OUTPUT" || false
+    grep -qxF "top=$P" "$GITHUB_OUTPUT" || false
+}
+
+@test "action.yml's key step does not run when the cache is disabled or the store is not the repo's" {
+    action_step key
+    [ "$(field if)" = "env.MVM_STORE == 'file' && env.MVM_DISABLE_CACHE != 'true'" ]
+}
+
+@test "action.yml's restore: the whole blob dir, by base and top, else their prefix, else the base prefix" {
+    action_step actions/cache/restore
+    [ "$(field with path)" = '${{ env.MVM_BLOB_DIR }}' ]
+    [ "$(field with key)" = 'mavericks-vm-${{ steps.key.outputs.base }}-${{ steps.key.outputs.top }}' ]
+    [ "$(field with restore-keys)" = 'mavericks-vm-${{ steps.key.outputs.base }}-${{ steps.key.outputs.top }}-
+mavericks-vm-${{ steps.key.outputs.base }}-' ]
+}
+
+@test "action.yml's save: the whole blob dir, under a key of base, top and the run, only when main stored something" {
+    action_step actions/cache/save
+    [ "$(field with path)" = '${{ env.MVM_BLOB_DIR }}' ]
+    [ "$(field with key)" = 'mavericks-vm-${{ steps.key.outputs.base }}-${{ steps.key.outputs.top }}-${{ github.run_id }}-${{ github.run_attempt }}' ]
+    [ "$(field if)" = "always() && steps.main.outputs.cache-save-key != ''" ]
 }
 
 # spec: tests/build.bats -- build.sh takes the template first; a bare <dir> exits 2 and breaks the action

@@ -81,7 +81,6 @@ key() { bash "$REPO/scripts/key.sh" "$@"; }
     [ "$status" -ne 0 ]
     [[ "$output" == *"v0.20261005.2"* ]] || false
     [[ "$output" == *"packer-plugin-macosx_v0.20261005.2_mavericks_base_recipe.txt"* ]] || false
-    [[ ! "$output" =~ ^[0-9a-f]{64}$ ]] || false
 }
 
 @test "a recipe that is not 64 hex digits fails" {
@@ -90,6 +89,13 @@ key() { bash "$REPO/scripts/key.sh" "$@"; }
         [ "$status" -ne 0 ] || { echo "accepted: $bad"; false; }
         [[ "$output" == *"mavericks_base_recipe.txt"* ]] || false
     done
+}
+
+@test "a recipe split across two lines fails" {
+    STUB_BASE_RECIPE="$(printf 'a%.0s' {1..32})
+$(printf 'a%.0s' {1..32})" run key --base
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"mavericks_base_recipe.txt"* ]] || false
 }
 
 @test "no flag is a usage error" {

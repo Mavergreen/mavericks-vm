@@ -70,6 +70,13 @@ layer() { bash "$REPO/scripts/layer.sh" "$@"; }
 }
 
 # spec: a delta is bound to the bytes of the image under it; the ids say which image that is
+# spec: the real-qemu-img test above skips where there is no qemu-img; the release's unit tests
+#       install it, so there it runs
+@test "the release's unit tests install qemu-img, so the real-qemu-img delta test runs there" {
+    grep -q '^        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats shellcheck qemu-utils$' \
+        "$REPO/.github/workflows/release.yml"
+}
+
 @test "the layer gets a fresh image-id, and the base's image-id as its backing-id" {
     run layer "$BASE" "$LAYER"
     [ "$status" -eq 0 ] || { echo "$output"; false; }

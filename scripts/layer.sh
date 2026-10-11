@@ -21,8 +21,14 @@ if [ "$(realpath -m "$base")" != "$(realpath -m "$layer/../box")" ]; then
   exit 2
 fi
 
-# spec: tests/layer.bats -- a layer dir that is not empty is somebody's; refuse before touching it
-if [ -n "$(ls -A "$layer" 2>/dev/null)" ]; then
+# spec: tests/layer.bats -- a layer dir that is not empty is somebody's, and one that cannot be
+#       listed is not known to be empty; refuse either before touching it
+if [ -e "$layer" ]; then
+  listing="$(ls -A "$layer")" || { echo "layer.sh: cannot read <layer-dir> $layer" >&2; exit 2; }
+else
+  listing=""
+fi
+if [ -n "$listing" ]; then
   echo "layer.sh: <layer-dir> $layer is not empty; refusing to write over it" >&2
   exit 2
 fi
@@ -38,17 +44,24 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-# spec: tests/layer.bats -- the exact error line is the one the brief names; build.sh's own lines precede it
-bash "$here/build.sh" mavericks-aquatransport "$full" "$base" \
-  || { echo "::error title=mavericks-vm::building the Aqua Transport layer"; exit 1; }
+fail() {  # $1 = what failed, for the log; the error line is always the same, naming the image
+  echo "::error title=mavericks-vm::building the Aqua Transport layer"
+  [ -z "${1:-}" ] || echo "layer.sh: $1" >&2
+  exit 1
+}
+
+# spec: tests/layer.bats -- a full image left by an earlier run is not built over or beside
+rm -rf "$full"
+# build.sh's own lines precede the error line
+bash "$here/build.sh" mavericks-aquatransport "$full" "$base" || fail
 
 mkdir -p "$layer"
 # spec: tests/layer.bats -- run in the layer dir so the relative backing file is stored as written
 (cd "$layer" && qemu-img convert -O qcow2 -F qcow2 -B ../box/box_0.img "$full/box_0.img" box_0.img) \
-  || { echo "::error title=mavericks-vm::building the Aqua Transport layer"; echo "layer.sh: writing the delta over the base failed" >&2; exit 1; }
+  || fail "writing the delta over the base failed"
 for f in OVMF_CODE.fd OVMF_VARS.fd opencore.img; do
   cp "$full/$f" "$layer/$f" \
-    || { echo "::error title=mavericks-vm::building the Aqua Transport layer"; echo "layer.sh: copying $f failed" >&2; exit 1; }
+    || fail "copying $f failed"
 done
 ok=true
 echo "layer.sh: the Aqua Transport layer is in $layer"

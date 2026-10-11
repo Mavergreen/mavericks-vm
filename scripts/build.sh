@@ -8,7 +8,7 @@
 #                   ...) in <dir>; on failure, the end of packer's output and exit 1
 set -euo pipefail
 
-usage="usage: build.sh <template> <dir> [<base-dir>]"
+usage="usage: build.sh <template> <dir> [<base-dir>] (template: mavericks or mavericks-aquatransport)"
 if [ $# -lt 2 ] || [ $# -gt 3 ]; then echo "$usage" >&2; exit 2; fi
 template="$1"; out="$2"; base="${3:-}"
 extra=()
@@ -16,6 +16,9 @@ case "$template" in
   mavericks) [ -z "$base" ] || { echo "$usage (mavericks takes no <base-dir>)" >&2; exit 2; } ;;
   mavericks-aquatransport)
     [ -n "$base" ] || { echo "$usage (mavericks-aquatransport needs <base-dir>)" >&2; exit 2; }
+    # spec: tests/build.bats -- packer runs in the template dir, so a relative base would be
+    #       resolved there; it is made absolute here
+    base="$(realpath -m "$base")"
     extra=(-var "base_box=$base") ;;
   *) echo "$usage (unknown template: $template)" >&2; exit 2 ;;
 esac

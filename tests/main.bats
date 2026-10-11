@@ -383,29 +383,29 @@ TABLE
 }
 
 # spec: the repo tier keeps two cache entries, so a change that moves only the layer saves only the
-#       small one: the base's (cache-save-base) and the deltas' (cache-save-delta). Each is written
-#       after a push that stored an image of that entry; a push that was skipped writes neither
+#       small ones: one per image (cache-save-base, -layer, -prepared). Each is written after a
+#       push that stored that image; a push that was skipped writes nothing
 saved() {  # $@ = the outputs that must be there, and no others of cache-save-*
-    for o in base delta; do
+    for o in base layer prepared; do
         if [[ " $* " == *" $o "* ]]; then grep -qxF "cache-save-$o=true" "$GITHUB_OUTPUT" || { echo "no cache-save-$o"; cat "$GITHUB_OUTPUT"; false; }
         else ! grep -q "^cache-save-$o=" "$GITHUB_OUTPUT" || { echo "cache-save-$o"; false; }
         fi
     done
 }
 
-@test "repo store, base and layer miss: both entries are to be saved" {
+@test "repo store, base and layer miss: both are to be saved, and no prepared" {
     drop base layer
     MVM_STORE=file run main
     [ "$status" -eq 0 ]
-    saved base delta
+    saved base layer
 }
 
-@test "repo store, layer miss over a base hit: only the delta entry is to be saved, never the base" {
+@test "repo store, layer miss over a base hit: only the layer is to be saved, never the base" {
     drop layer
     MVM_STORE=file run main
     [ "$status" -eq 0 ]
     [ "$(pushes)" = "image.sh push $L layer" ]
-    saved delta
+    saved layer
 }
 
 @test "repo store, hit: nothing new to save" {
@@ -417,26 +417,26 @@ saved() {  # $@ = the outputs that must be there, and no others of cache-save-*
 # spec: the repo tier once skipped the base's push with cache-after-prepare on, keeping only the
 #       prepared guest; the prepared is now a delta over the layer, over the base, so every image
 #       this run builds is pushed and named
-@test "repo store, cache-after-prepare miss: base, layer and prepared are each pushed, both entries saved" {
+@test "repo store, cache-after-prepare miss: base, layer and prepared are each pushed, all three saved" {
     drop base layer
     MVM_STORE=file MVM_CACHE_AFTER_PREPARE=true run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     [ "$(pushes)" = "image.sh push $K box image.sh push $L layer image.sh push $P prepared" ]
-    saved base delta
+    saved base layer prepared
 }
 
-@test "repo store, only the prepared image is new: only the delta entry is to be saved" {
+@test "repo store, prepare changed and nothing else: only the prepared image is to be saved, the layer kept" {
     MVM_STORE=file MVM_CACHE_AFTER_PREPARE=true run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     [ "$(pushes)" = "image.sh push $P prepared" ]
-    saved delta
+    saved prepared
 }
 
 @test "a failing run still reports what it cached, so it is saved anyway" {
     drop base layer
     MVM_STORE=file MVM_RUN='fail' run main
     [ "$status" -eq 7 ]
-    saved base delta
+    saved base layer
 }
 
 # spec: a 40-minute base is not thrown away because the layer built over it failed
@@ -541,15 +541,15 @@ prune_setup() {
     MVM_STORE=file MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='' run main
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     [ "$(pushes)" = "image.sh push $K box image.sh push $L layer" ]
-    saved base delta
+    saved base layer
     run grep -q 'key.sh --prepared' "$CALLS"
     [ "$status" -ne 0 ]
 }
 
-# spec: action.yml -- the repo tier keeps two cache entries: the base (one ~6 GB blob, saved only
-#       when this run stored it) and the deltas (the layer's and the prepared blob, saved when this
-#       run stored either), so a change to only the layer never saves the base a second time
-action_step() {  # $1 = a step's id or the start of its uses, $2 = which of them (1st, 2nd); writes it as JSON to step.json
+# spec: action.yml -- the repo tier keeps one cache entry per image: the base (one ~6 GB blob), the
+#       layer and the prepared image, each saved only when this run stored it, so a change that
+#       moves only the layer, or only prepare, never saves the base (or the layer) again
+action_step() {  # $1 = a step's id or the start of its uses, $2 = which of them (1st, 2nd, ...); writes it as JSON to step.json
     python3 - "$REPO/action.yml" "$1" "${2:-1}" > "$BATS_TEST_TMPDIR/step.json" <<'PY'
 import sys, yaml, json
 steps = yaml.safe_load(open(sys.argv[1]))["runs"]["steps"]
@@ -566,42 +566,44 @@ key_step() {  # runs the key step, taken from step.json, in a scratch action dir
     field run > "$BATS_TEST_TMPDIR/keystep.sh"
     mkdir -p "$BATS_TEST_TMPDIR/action/scripts"; cp "$S/key.sh" "$BATS_TEST_TMPDIR/action/scripts/"
     : > "$GITHUB_OUTPUT"; : > "$BATS_TEST_TMPDIR/env"; : > "$CALLS"; : > "$BATS_TEST_TMPDIR/recipe-seen"
-    GITHUB_ACTION_PATH="$BATS_TEST_TMPDIR/action" GITHUB_ENV="$BATS_TEST_TMPDIR/env" MVM_BLOB_DIR=/b \
+    GITHUB_ACTION_PATH="$BATS_TEST_TMPDIR/action" GITHUB_ENV="$BATS_TEST_TMPDIR/env" \
         run bash -e "$BATS_TEST_TMPDIR/keystep.sh"
 }
 KEY_IF="env.MVM_STORE == 'file' && env.MVM_DISABLE_CACHE != 'true'"
-BASE='${{ steps.key.outputs.base }}' TOP='${{ steps.key.outputs.top }}' RUN='${{ github.run_id }}-${{ github.run_attempt }}'
+RUN='${{ github.run_id }}-${{ github.run_attempt }}'
+RECIPE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-@test "action.yml's key step outputs base, layer, top and the delta blobs: the layer is top when prepare is empty" {
+@test "action.yml's key step outputs base, layer and recipe, and prepared only when it is wanted" {
     action_step key
     MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='' key_step
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     grep -qxF "base=$K" "$GITHUB_OUTPUT" || false
     grep -qxF "layer=$L" "$GITHUB_OUTPUT" || false
-    grep -qxF "top=$L" "$GITHUB_OUTPUT" || false
-    [ "$(sed -n '/^delta_paths<</,/^[A-Z_]*$/p' "$GITHUB_OUTPUT" | grep '^/b')" = "/b/$L.tar.zst.age" ]
-}
-
-@test "action.yml's key step: top and the delta blobs are the layer's without cache-after-prepare, the prepared's too with it" {
-    action_step key
+    grep -qxF "prepared=" "$GITHUB_OUTPUT" || false
     MVM_CACHE_AFTER_PREPARE=false MVM_PREPARE='echo p' key_step
-    [ "$status" -eq 0 ] || { echo "$output"; false; }
-    grep -qxF "top=$L" "$GITHUB_OUTPUT" || false
-    [ "$(sed -n '/^delta_paths<</,/^[A-Z_]*$/p' "$GITHUB_OUTPUT" | grep '^/b')" = "/b/$L.tar.zst.age" ]
+    grep -qxF "prepared=" "$GITHUB_OUTPUT" || false
     MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='echo p' key_step
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    grep -qxF "base=$K" "$GITHUB_OUTPUT" || false
-    grep -qxF "top=$P" "$GITHUB_OUTPUT" || false
-    [ "$(sed -n '/^delta_paths<</,/^[A-Z_]*$/p' "$GITHUB_OUTPUT" | grep '^/b' | paste -sd' ')" = "/b/$L.tar.zst.age /b/$P.tar.zst.age" ]
+    grep -qxF "prepared=$P" "$GITHUB_OUTPUT" || false
+    grep -qxF "recipe=$RECIPE" "$GITHUB_OUTPUT" || false
 }
 
-@test "action.yml's key step fetches the base recipe once, and hands it to the key computations and to main.sh" {
+# spec: a recipe left in the job's environment would be trusted by a later mavericks-vm step of
+#       another version, which would compute its keys from this one's recipe
+@test "action.yml's key step fetches the recipe once, hands it to its keys, and never writes it to the job's environment" {
     action_step key
-    MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='echo p' key_step
+    [ "$(field env MVM_BASE_RECIPE)" = "" ]
+    MVM_CACHE_AFTER_PREPARE=true MVM_PREPARE='echo p' MVM_BASE_RECIPE=leaked key_step
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     [ "$(grep -c 'key.sh --recipe' "$CALLS")" = 1 ]
-    [ "$(sort -u "$BATS_TEST_TMPDIR/recipe-seen")" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ]
-    grep -qxF "MVM_BASE_RECIPE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$BATS_TEST_TMPDIR/env" || false
+    [ "$(sort -u "$BATS_TEST_TMPDIR/recipe-seen")" = $RECIPE ]
+    [ ! -s "$BATS_TEST_TMPDIR/env" ]
+    ! field run | grep -q GITHUB_ENV
+}
+
+@test "action.yml's main step takes the recipe from the key step, which is empty when no key step ran" {
+    action_step main
+    [ "$(field env MVM_BASE_RECIPE)" = '${{ steps.key.outputs.recipe }}' ]
 }
 
 @test "action.yml's key step names its own failure" {
@@ -618,34 +620,32 @@ BASE='${{ steps.key.outputs.base }}' TOP='${{ steps.key.outputs.top }}' RUN='${{
     [ "$(field if)" = "$KEY_IF" ]
 }
 
-@test "action.yml's base restore: the base blob alone, by its key, else by its key's prefix" {
-    action_step actions/cache/restore 1
-    [ "$(field if)" = "$KEY_IF" ]
-    [ "$(field with path)" = "\${{ env.MVM_BLOB_DIR }}/$BASE.tar.zst.age" ]
-    [ "$(field with key)" = "mavericks-vm-base-$BASE" ]
-    [ "$(field with restore-keys)" = "mavericks-vm-base-$BASE-" ]
+@test "action.yml's restores: each image's blob alone, by its key, else its key's prefix; prepared only when wanted" {
+    n=0
+    for img in base layer prepared; do
+        n=$((n + 1))
+        action_step actions/cache/restore $n
+        if [ $img = prepared ]; then [ "$(field if)" = "$KEY_IF && steps.key.outputs.prepared != ''" ]
+        else [ "$(field if)" = "$KEY_IF" ]; fi
+        [ "$(field with path)" = "\${{ env.MVM_BLOB_DIR }}/\${{ steps.key.outputs.$img }}.tar.zst.age" ]
+        [ "$(field with key)" = "mavericks-vm-$img-\${{ steps.key.outputs.$img }}" ]
+        [ "$(field with restore-keys)" = "mavericks-vm-$img-\${{ steps.key.outputs.$img }}-" ]
+    done
+    run python3 -c 'import yaml; print(sum(s.get("uses", "").startswith("actions/cache/restore") for s in yaml.safe_load(open("'"$REPO"'/action.yml"))["runs"]["steps"]))'
+    [ "$output" = 3 ]
 }
 
-@test "action.yml's delta restore: the layer's and the prepared blobs, by the top key, else its prefix" {
-    action_step actions/cache/restore 2
-    [ "$(field if)" = "$KEY_IF" ]
-    [ "$(field with path)" = '${{ steps.key.outputs.delta_paths }}' ]
-    [ "$(field with key)" = "mavericks-vm-delta-$TOP" ]
-    [ "$(field with restore-keys)" = "mavericks-vm-delta-$TOP-" ]
-}
-
-@test "action.yml's base save: the base blob alone, only when this run stored the base" {
-    action_step actions/cache/save 1
-    [ "$(field if)" = "always() && steps.main.outputs.cache-save-base == 'true'" ]
-    [ "$(field with path)" = "\${{ env.MVM_BLOB_DIR }}/$BASE.tar.zst.age" ]
-    [ "$(field with key)" = "mavericks-vm-base-$BASE-$RUN" ]
-}
-
-@test "action.yml's delta save: the delta blobs, never the base, only when this run stored one" {
-    action_step actions/cache/save 2
-    [ "$(field if)" = "always() && steps.main.outputs.cache-save-delta == 'true'" ]
-    [ "$(field with path)" = '${{ steps.key.outputs.delta_paths }}' ]
-    [ "$(field with key)" = "mavericks-vm-delta-$TOP-$RUN" ]
+@test "action.yml's saves: each image's blob alone, under its key and the run, only when this run stored that image" {
+    n=0
+    for img in base layer prepared; do
+        n=$((n + 1))
+        action_step actions/cache/save $n
+        [ "$(field if)" = "always() && steps.main.outputs.cache-save-$img == 'true'" ]
+        [ "$(field with path)" = "\${{ env.MVM_BLOB_DIR }}/\${{ steps.key.outputs.$img }}.tar.zst.age" ]
+        [ "$(field with key)" = "mavericks-vm-$img-\${{ steps.key.outputs.$img }}-$RUN" ]
+    done
+    run python3 -c 'import yaml; print(sum(s.get("uses", "").startswith("actions/cache/save") for s in yaml.safe_load(open("'"$REPO"'/action.yml"))["runs"]["steps"]))'
+    [ "$output" = 3 ]
 }
 
 # spec: tests/build.bats -- build.sh takes the template first; a bare <dir> exits 2 and breaks the action

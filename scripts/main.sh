@@ -16,18 +16,13 @@ step() { bash "$here/$1" "${@:2}"; }
 store="${MVM_STORE:-registry}"
 
 # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Two tiers" (in
-#       packer-plugin-macosx) -- the repo tier keeps two actions/cache entries, so a change that
-#       moves only the layer never saves the ~6 GB base again: the base's, and the deltas' (the
-#       layer and the prepared image). After each successful push this says which entry has
-#       something new for action.yml's save steps (cache-save-base, cache-save-delta), so a failing
-#       run still keeps what it stored. A push that was skipped, and a run that stored nothing,
-#       name nothing.
+#       packer-plugin-macosx) -- the repo tier keeps an actions/cache entry per image, so a change
+#       that moves only the layer, or only prepare, never saves the ~6 GB base (or the layer) again.
+#       After each successful push this says which image was stored (cache-save-base, -layer or
+#       -prepared) for action.yml's save steps, so a failing run still keeps what it stored. A push
+#       that was skipped, and a run that stored nothing, name nothing.
 pushed() {  # $1 = base, layer or prepared: the image just stored
-  [ "$store" = file ] || return 0
-  case "$1" in
-    base) echo "cache-save-base=true" ;;
-    *) echo "cache-save-delta=true" ;;
-  esac >> "${GITHUB_OUTPUT:-/dev/null}"
+  if [ "$store" = file ]; then echo "cache-save-$1=true" >> "${GITHUB_OUTPUT:-/dev/null}"; fi
 }
 
 # spec: tests/main.bats -- the repo tier keeps only this run's set: every <64-hex>.tar.zst.age in

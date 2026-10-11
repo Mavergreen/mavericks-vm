@@ -114,14 +114,14 @@ uses = [s.get("uses", "") for s in steps]
 rs = [i for i, u in enumerate(uses) if u.startswith("actions/cache/restore@")]
 ws = [i for i, u in enumerate(uses) if u.startswith("actions/cache/save@")]
 check = names.index("Check the inputs"); main = names.index("Run in Mavericks")
-ok = len(rs) == 2 and len(ws) == 2
+ok = len(rs) == 3 and len(ws) == 3
 r, w = rs[0], ws[0]
 ok = ok and all(check < i < main for i in rs) and all(main < i for i in ws)
-for i, out in zip(ws, ("cache-save-base", "cache-save-delta")):
+for i, out in zip(ws, ("cache-save-base", "cache-save-layer", "cache-save-prepared")):
     save_if = steps[i].get("if", "")
     ok = ok and "always()" in save_if and out in save_if
 key_if = next(s for s in steps if s.get("id") == "key").get("if", "")
-ok = ok and all(steps[i].get("if", "") == key_if for i in rs) and "env.MVM_STORE == 'file'" in key_if
+ok = ok and all(steps[i].get("if", "").startswith(key_if) for i in rs) and "env.MVM_STORE == 'file'" in key_if
 # spec: tests/image.bats -- a guest that will not decrypt (the key changed) is rebuilt and saved
 #       under a newer name; restore takes the newest by prefix, never an exact name
 rw, ww = steps[r].get("with", {}), steps[w].get("with", {})

@@ -18,27 +18,31 @@ They are AMD or Intel at random. Six CPU models have run the self-test:
 
 | | Measured | Run |
 |---|---|---|
-| A cache hit, step start to the guest answering SSH | about 3-4 min | 37653472664 |
-| Boot, QEMU start to SSH | 60-67 s | every self-test |
-| A cold build: fetch, build, encrypt, push | 38 min (shared registry), 39 min (repo cache) | 37653472664 |
+| A cache hit of the base and the layer, step start to the guest answering SSH | about 4 min | 38174599184 |
+| Boot, QEMU start to SSH | 51-54 s (60-67 s before the layer) | every self-test |
+| A cold build: the base (fetch, build, encrypt, push, 38 min), then the layer over it (14 min) | 53 min (shared registry), 54 min (repo cache) | 38166708583 |
+| A layer-only build: pull the cached base, build and push the layer | 15 min (shared registry), 14 min (repo cache) | 38175442692 |
 | A consumer's whole job: openssh's pkg installed and smoke-tested | 4 min | Mavergreen/openssh 37670704996 |
 
 ## Disk
 
-The peak use of `data-dir`'s filesystem while the step runs, sampled every 5 s (run 37653472664,
-packer-plugin-macosx v0.20261005.4). `scripts/space-needed` checks for these, with a margin:
+The peak use of `data-dir`'s filesystem while the step runs, sampled every 5 s with its time, on
+2026-10-11 with packer-plugin-macosx v0.20261005.6 and .7. `scripts/space-needed` checks for these,
+with a margin, before each step starts:
 
 | | Peak | Checked for |
 |---|---|---|
-| A hit | 13-14 GiB | 20 GiB |
-| A cold build | 36 GiB (shared registry), 37 GiB (repo cache) | 45 GiB |
+| A hit | 14 GiB (shared registry, run 38174599184); 20 GiB with the repo cache, whose ~6 GiB restore lands before the check | 20 GiB |
+| A cold build: the base and then the layer over it (a new base is always a new layer, which is bound to it) | 44 GiB (shared registry), 49 GiB (repo cache), run 38166708583 | 55 GiB |
+| A layer build over a pulled base | 12-13 GiB more than the base already took: 30 GiB in all (shared registry), 36 GiB (repo cache), run 38175442692 | 20 GiB |
 | `cache-after-prepare`'s snapshot | **not measured**: no self-test job caches after prepare | 20 GiB |
 
 ## The cached guest
 
 | | Size |
 |---|---|
-| The image, zstd -10 and age-encrypted | 6.03 GB (6.83 GB before the zero-fill, plugin v0.20261005.3) |
+| The base image, zstd -10 and age-encrypted | 6.03 GB (6.83 GB before the zero-fill, plugin v0.20261005.3) |
+| The Aqua Transport layer, a qcow2 delta over the base, the same | 52 MB (run 38166708583) |
 
 ## What a CPU model needs
 

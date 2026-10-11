@@ -15,7 +15,7 @@ printf 'curl %s\n' "$url" >> "$STUB_LOG"
 case "$url" in
   *_mavericks_base_recipe.txt)
     [ -n "${STUB_BASE_RECIPE:-}" ] || exit 22
-    if [ -n "$out" ]; then printf '%s\n' "$STUB_BASE_RECIPE" > "$out"; else printf '%s\n' "$STUB_BASE_RECIPE"; fi
+    printf '%s\n' "$STUB_BASE_RECIPE"
     exit 0 ;;
 esac
 cp "$STUB_TEMPLATE_ZIP" "$out"

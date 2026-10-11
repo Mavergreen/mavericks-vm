@@ -28,9 +28,9 @@ recipe="$(tr -d '[:space:]' < "$root/scripts/guest-recipe" 2>/dev/null || true)"
 base_key() {
   asset="packer-plugin-macosx_${pin}_mavericks_base_recipe.txt"
   url="https://github.com/Mavergreen/packer-plugin-macosx/releases/download/$pin/$asset"
-  plugin_recipe="$(curl -fsSL --retry 3 --max-time 60 "$url" | tr -d '[:space:]')" || plugin_recipe=""
+  plugin_recipe="$(curl -fsSL --retry 3 --max-time 60 "$url")" || plugin_recipe=""
   [[ "$plugin_recipe" =~ ^[0-9a-f]{64}$ ]] || {
-    echo "key.sh: no base recipe (64 hex digits) in $asset of packer-plugin-macosx release $pin ($url)" >&2
+    echo "key.sh: no base recipe (one line of 64 hex digits) in $asset of packer-plugin-macosx release $pin ($url)" >&2
     exit 1
   }
   {

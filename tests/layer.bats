@@ -13,6 +13,7 @@ setup() {
     (cd "$BATS_TEST_TMPDIR/z" && zip -qr ../template.zip templates)
     export STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/template.zip"
     printf basedisk > "$MVM_DATA_DIR/box/box_0.img"
+    BASE_ID=0123456789abcdef0123456789abcdef; printf '%s\n' "$BASE_ID" > "$MVM_DATA_DIR/box/image-id"
     BASE="$MVM_DATA_DIR/box"; LAYER="$MVM_DATA_DIR/layer"
 }
 
@@ -31,6 +32,31 @@ layer() { bash "$REPO/scripts/layer.sh" "$@"; }
     grep -qxF "qemu-img convert -O qcow2 -F qcow2 -B ../box/box_0.img $MVM_DATA_DIR/layer-full/box_0.img box_0.img" "$STUB_LOG"
     grep -qxF "cwd $LAYER" "$STUB_LOG"
     [ -f "$LAYER/box_0.img" ]
+}
+
+# spec: a delta is bound to the bytes of the image under it; the ids say which image that is
+@test "the layer gets a fresh image-id, and the base's image-id as its backing-id" {
+    run layer "$BASE" "$LAYER"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(cat "$LAYER/backing-id")" = "$BASE_ID" ]
+    first="$(cat "$LAYER/image-id")"
+    [[ "$first" =~ ^[0-9a-f]{32}$ ]] || false
+    [ "$first" != "$BASE_ID" ]
+    rm -rf "$LAYER"
+    run layer "$BASE" "$LAYER"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(cat "$LAYER/image-id")" != "$first" ]
+}
+
+@test "a base with no image-id fails naming the layer, before anything is built" {
+    rm "$BASE/image-id"
+    run layer "$BASE" "$LAYER"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error title=mavericks-vm::building the Aqua Transport layer"* ]] || false
+    [[ "$output" == *"image-id"* ]] || false
+    run grep -q '^packer' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+    [ ! -e "$LAYER" ]
 }
 
 @test "the firmware comes from the layer's own build" {

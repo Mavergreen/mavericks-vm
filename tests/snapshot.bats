@@ -13,6 +13,7 @@ setup() {
     echo 999999 > "$MVM_DATA_DIR/qemu.pid"   # no such process: QEMU has already exited
     BOX="$BATS_TEST_TMPDIR/layer"; mkdir -p "$BOX"
     for f in box_0.img OVMF_CODE.fd OVMF_VARS.fd opencore.img; do printf '%s' "$f" > "$BOX/$f"; done
+    LAYER_ID=0123456789abcdef0123456789abcdef; printf '%s\n' "$LAYER_ID" > "$BOX/image-id"
 }
 
 # spec: the prepared image is a delta whose backing file is the literal ../layer/box_0.img, written
@@ -41,5 +42,24 @@ setup() {
     kill %1 2>/dev/null
     [ "$status" -ne 0 ]
     run grep -q '^qemu-img convert' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
+# spec: a delta is bound to the bytes of the image under it; the ids say which image that is
+@test "the prepared image gets a fresh image-id, and the layer's image-id as its backing-id" {
+    run bash "$REPO/scripts/snapshot.sh" "$BOX" "$BATS_TEST_TMPDIR/prepared"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(cat "$BATS_TEST_TMPDIR/prepared/backing-id")" = "$LAYER_ID" ]
+    id="$(cat "$BATS_TEST_TMPDIR/prepared/image-id")"
+    [[ "$id" =~ ^[0-9a-f]{32}$ ]] || false
+    [ "$id" != "$LAYER_ID" ]
+}
+
+@test "a layer with no image-id is refused before the guest is shut down" {
+    rm "$BOX/image-id"
+    run bash "$REPO/scripts/snapshot.sh" "$BOX" "$BATS_TEST_TMPDIR/prepared"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error title=mavericks-vm::snapshotting the prepared image"*"image-id"* ]] || false
+    run grep -q 'shutdown' "$STUB_LOG"
     [ "$status" -ne 0 ]
 }

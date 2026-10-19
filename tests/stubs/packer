@@ -3,6 +3,7 @@
 # Mavericks template would (its disk a copy of $STUB_PACKER_DISK, when that is set), or fails when
 # STUB_PACKER_FAIL is set.
 printf 'packer %s\n' "$*" >> "$STUB_LOG"
+. "$(dirname "$0")/_confine.sh"
 printf 'packer-token %s %s\n' "$1" "${PACKER_GITHUB_API_TOKEN:+set}" >> "$STUB_LOG"
 case "$1" in
   plugins|init)
@@ -14,6 +15,7 @@ case "$1" in
       for i in $(seq 1 60); do echo "packer line $i"; done
       echo "Build 'qemu.mavericks' errored: the host check refused"; exit 1
     fi
+    confine "$PWD/output" "$PWD/s"
     printf 'PACKER_CACHE_DIR=%s\n' "${PACKER_CACHE_DIR:-}" >> "$STUB_LOG"
     # the layer template's box is named for the layer, as the plugin's is
     case "$PWD" in *-aquatransport) name=aquatransport ;; *) name="" ;; esac

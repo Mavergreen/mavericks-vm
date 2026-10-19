@@ -6,6 +6,8 @@
 printf 'sudo %s\n' "$*" >> "${STUB_LOG:-/dev/null}"
 case "$1" in
   chown|automount) exit 0 ;;            # no vagrant user here; no auto_master to reread
-  mkdir|sed) exec "$@" ;;
+  # spec: tests/stubs_safety.bats -- what they write is confined to the test's tmp dir
+  mkdir) . "$(dirname "$0")/_confine.sh"; for a in "${@:2}"; do [[ "$a" == -* ]] || confine "$a"; done; exec "$@" ;;
+  sed) . "$(dirname "$0")/_confine.sh"; confine "${@: -1}"; exec "$@" ;;
   *) echo "stub sudo: refusing '$1' (not on the allowlist in tests/stubs/sudo)" >&2; exit 1 ;;
 esac

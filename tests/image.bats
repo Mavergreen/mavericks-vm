@@ -12,6 +12,9 @@ setup() {
     export MVM_TOKEN='ghp_tokennotinargv' GITHUB_ACTOR=someone
     export MVM_REGISTRY=ghcr.io/mavergreen/mavericks-vm-images
     export MVM_DATA_DIR="$BATS_TEST_TMPDIR/data"
+    # spec: tests/stubs_safety.bats -- image.sh's work dir, with no data dir yet, is under TMPDIR,
+    #       where the stubs may write: the test's own tmp dir, never this machine's /tmp
+    export TMPDIR="$BATS_TEST_TMPDIR"
     BOX="$BATS_TEST_TMPDIR/box"; mkdir -p "$BOX"
     printf 'disk' > "$BOX/box_0.img"; printf 'code' > "$BOX/OVMF_CODE.fd"
     printf 'vars' > "$BOX/OVMF_VARS.fd"; printf 'oc' > "$BOX/opencore.img"

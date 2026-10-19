@@ -17,4 +17,6 @@ shift   # the host
 stubs="$(cd "$(dirname "$0")" && pwd)"
 # -n, as ssh's: the remote command reads nothing from this side's stdin
 if [ -n "$nostdin" ]; then exec < /dev/null; fi
-exec env -i PATH="$stubs/guest:$stubs:/usr/bin:/bin" HOME="$HOME" STUB_LOG="$STUB_LOG" bash -c "$*"
+# The test's tmp dir goes with it, so the guest's sudo stays confined to it (tests/stubs/_confine.sh).
+exec env -i PATH="$stubs/guest:$stubs:/usr/bin:/bin" HOME="$HOME" STUB_LOG="$STUB_LOG" \
+  STUB_ROOT="${STUB_ROOT:-${BATS_TEST_TMPDIR:-}}" bash -c "$*"

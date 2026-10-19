@@ -77,7 +77,9 @@ run_() { bash "$REPO/scripts/run.sh" "$@"; }
 # spec: a custom-shell step syncs in again over the guest's copy, whose git objects are read-only,
 #       and scp writes into each existing file in place (Actions run 37554261002)
 @test "scp copies in again over a guest workspace that holds read-only files" {
-    export STUB_SCP_COPY=1
+    # The stand-in guest's /tmp is this machine's, and its mktemp makes the staging dir there:
+    # the one place outside this test's tmp dir the stubs may write (tests/stubs/_confine.sh)
+    export STUB_SCP_COPY=1 STUB_GUEST_SCRATCH=/tmp/mavericks-vm-sync.
     printf 'object\n' > "$GITHUB_WORKSPACE/object"; chmod 444 "$GITHUB_WORKSPACE/object"
     MVM_SYNC=scp run sync_ in
     [ "$status" -eq 0 ] || { echo "$output"; false; }

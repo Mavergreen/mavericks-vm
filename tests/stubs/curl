@@ -3,6 +3,7 @@
 # base-recipe asset), recording it in $STUB_LOG (and the
 # whole argv on a curl-args line).
 printf 'curl-args %s\n' "$*" >> "$STUB_LOG"
+. "$(dirname "$0")/_confine.sh"
 out=""; url=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -18,4 +19,5 @@ case "$url" in
     printf '%s\n' "$STUB_BASE_RECIPE"
     exit 0 ;;
 esac
+confine "$out"
 cp "$STUB_TEMPLATE_ZIP" "$out"

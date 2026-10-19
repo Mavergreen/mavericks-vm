@@ -1,8 +1,10 @@
 #!/bin/bash
 # A stand-in QEMU: records its argv (one per line) in $STUB_QEMU_ARGV and "daemonizes".
-printf '%s\n' "$@" > "$STUB_QEMU_ARGV"
-env > "${STUB_QEMU_ARGV}.env"
+. "$(dirname "$0")/_confine.sh"
 pid=""; prev=""
 for a in "$@"; do [ "$prev" = -pidfile ] && pid="$a"; prev="$a"; done
+confine "$STUB_QEMU_ARGV" "$STUB_QEMU_ARGV.env" ${pid:+"$pid"}
+printf '%s\n' "$@" > "$STUB_QEMU_ARGV"
+env > "${STUB_QEMU_ARGV}.env"
 [ -n "$pid" ] && echo 4242 > "$pid"
 exit 0

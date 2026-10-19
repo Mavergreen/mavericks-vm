@@ -2,6 +2,7 @@
 # A stand-in for age: "encrypts" by prepending a header naming the recipient, and
 # "decrypts" only with the identity whose recipient that is. Records argv in $STUB_LOG.
 printf 'age %s\n' "$*" >> "$STUB_LOG"
+. "$(dirname "$0")/_confine.sh"
 mode=enc; recipient=""; out=""; in=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -12,6 +13,7 @@ while [ $# -gt 0 ]; do
     *) in="$1"; shift ;;
   esac
 done
+if [ -n "$out" ] && [ "$out" != - ]; then confine "$out"; fi
 w() { if [ -n "$out" ] && [ "$out" != - ]; then cat > "$out"; else cat; fi; }
 if [ "$mode" = enc ]; then
   { printf 'STUBAGE recipient=%s\n' "$recipient"; cat; } | w

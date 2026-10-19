@@ -1,10 +1,12 @@
 #!/bin/bash
 # platform: GitHub's Linux runners only (Ubuntu's apt, bash) -- this Action runs nowhere else
 #   usage: install-tools.sh
-#          env in:  MVM_TOOLS_DIR (default $RUNNER_TEMP/mavericks-vm-tools); MVM_SKIP_APT (tests);
-#                   MVM_APT_TIMEOUT (180) and MVM_APT_TRIES (3), per apt step; MVM_INSTALL_TIMEOUT (600)
-#          out:     QEMU, zstd and rsync from apt; age, oras and packer, each its pinned release
-#                   checked by sha256, on the job's PATH
+#          env in:  MVM_TOOLS_DIR (default $RUNNER_TEMP/mavericks-vm-tools); MVM_SKIP_APT and
+#                   MVM_MODULES_DIR (/lib/modules) (tests); MVM_APT_TIMEOUT (180) and MVM_APT_TRIES
+#                   (3), per apt step; MVM_INSTALL_TIMEOUT (600)
+#          out:     QEMU, zstd and rsync from apt; hfsplus for the running kernel when it lacks it
+#                   and the archive has it, and otherwise MVM_NO_HFSPLUS=<release> in $GITHUB_ENV;
+#                   age, oras and packer, each its pinned release checked by sha256, on the job's PATH
 set -euo pipefail
 
 # spec: INGREDIENTS.md -- age, oras and packer are pinned here; QEMU, zstd and rsync are the
@@ -39,9 +41,9 @@ step() {  # $1 = what it is, then the command
   exit 1
 }
 
-# spec: tests/safety.bats -- apt's install of linux-modules-extra takes 12-22 s on GitHub's runners,
-#       and on 2026-10-08 twice printed nothing for the whole 600 s (runs 37833815882 and
-#       37836734837): a stall, not slowness. So an apt step has a shorter limit and more than one
+# spec: tests/safety.bats -- apt's install of linux-modules-extra, which every run made until 7.0
+#       kernels had hfsplus without it, took 12-22 s on GitHub's runners, and on 2026-10-08 twice
+#       printed nothing for the whole 600 s (runs 37833815882 and 37836734837): a stall, not slowness. So an apt step has a shorter limit and more than one
 #       try, and dpkg finishes, between tries, whatever the killed attempt left half done.
 apt_limit="${MVM_APT_TIMEOUT:-180}"
 apt_tries="${MVM_APT_TRIES:-3}"
@@ -62,6 +64,37 @@ apt_step() {  # $1 = what it is, then apt-get's arguments
   exit 1
 }
 
+# spec: tests/safety.bats -- the plugin's microVM loads hfsplus into the kernel it boots, and
+#       takes a module it cannot find to be built in, so without it the microVM fails later,
+#       mounting the installer (Actions runs 37507097828, 37508429892). Ubuntu's Azure kernels
+#       through 6.17 keep hfsplus in linux-modules-extra-<release>, which the runner image does
+#       not install; 7.0's have no such package, and hfsplus is in linux-modules-<release>, which
+#       every kernel has (ubuntu24/20261018.339 asked for linux-modules-extra-7.0.0-1017-azure,
+#       which does not exist: Mavergreen/longboat Actions run 39311778407). So what is installed
+#       follows from what the running kernel lacks, and the log says which.
+mods="${MVM_MODULES_DIR:-/lib/modules}"
+kernel_with_hfsplus() {  # for the running release $rel: hfsplus a module in its tree, or built in
+  if [ -n "$(find -H "$mods/$rel" -name 'hfsplus.ko*' -print -quit 2> /dev/null)" ] \
+    || grep -qs '/hfsplus\.ko$' "$mods/$rel/modules.builtin"; then
+    echo "install-tools: the running kernel, $rel, has hfsplus: no kernel package to install"
+    return
+  fi
+  # spec: tests/safety.bats -- this step runs before the run knows whether it builds the base
+  #       image, the only build that needs hfsplus (for its installer media), and says so
+  if apt-cache show "linux-modules-extra-$rel" > /dev/null 2>&1; then
+    echo "install-tools: the running kernel, $rel, has no hfsplus; installing linux-modules-extra-$rel, which has it, before this run knows whether it builds the base image"
+    apt_step "apt-get install of linux-modules-extra-$rel" \
+      install -y -qq --no-install-recommends "linux-modules-extra-$rel"
+    return
+  fi
+  # spec: tests/main.bats -- nothing else here can supply it: the pinned plugin boots only the
+  #       running kernel (packer-plugin-macosx boots another installed one, which this step could
+  #       then unpack, from the release with privops' chooseRelease, once this repo pins it). So
+  #       the run goes on, and main.sh stops it if, and only if, it must build the base image.
+  echo "::warning title=mavericks-vm::the running kernel, $rel, has no hfsplus module, and the archive has no linux-modules-extra-$rel: building the base image here would fail, so this run stops if it must build one"
+  echo "MVM_NO_HFSPLUS=$rel" >> "${GITHUB_ENV:-/dev/null}"
+}
+
 if [ -z "${MVM_SKIP_APT:-}" ]; then
   apt_step "apt-get update" update -qq
   # platform: what packer-plugin-macosx builds with beyond the runner image -- nasm, iasl and
@@ -78,14 +111,11 @@ if [ -z "${MVM_SKIP_APT:-}" ]; then
   #           37539764898 and packer-plugin-macosx docs/decisions/0009). The default Penryn never
   #           reads it; the runner is disposable, so this costs nothing else
   echo Y | sudo tee /sys/module/kvm/parameters/ignore_msrs > /dev/null
-  # platform: the plugin's media microVM boots the runner's own kernel, which Ubuntu leaves
-  #           readable by root alone (0600 on the 2026-10-06 runner image)
-  sudo chmod 644 "/boot/vmlinuz-$(uname -r)"
-  # platform: and loads hfsplus into it, which Ubuntu's Azure kernel ships only in its extra
-  #           modules; the plugin takes a module it cannot find to be built in, so without these
-  #           its microVM fails later, mounting the installer (Actions runs 37507097828, 37508429892)
-  apt_step "apt-get install of linux-modules-extra-$(uname -r)" \
-    install -y -qq --no-install-recommends "linux-modules-extra-$(uname -r)"
+  # platform: the plugin's media microVM boots the running kernel (the pinned plugin, always),
+  #           which Ubuntu leaves readable by root alone (0600 on the 2026-10-06 runner image)
+  rel="$(uname -r)"
+  sudo chmod 644 "/boot/vmlinuz-$rel"
+  kernel_with_hfsplus
 fi
 
 fetch() {  # $1 = url, $2 = sha256, $3 = file

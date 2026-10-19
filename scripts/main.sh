@@ -2,6 +2,7 @@
 # platform: GitHub's Linux runners only (bash) -- this Action runs nowhere else
 #   usage: main.sh
 #          env in:  MVM_* (scripts/inputs.sh), MVM_PREPARE, MVM_RUN, MVM_IMAGE_KEY, MVM_TOKEN;
+#                   MVM_NO_HFSPLUS (install-tools.sh: the running kernel, when it has no hfsplus);
 #                   MVM_BASE_RECIPE (optional: the plugin's base recipe, as action.yml's key step
 #                   fetched it; when empty, key.sh fetches it here)
 #          out:     run's exit status; in $GITHUB_OUTPUT, cache-after-prepare-hit and, in the repo
@@ -111,6 +112,13 @@ discard() {  # $1 = base, layer or prepared; $2 = its dir; $3 = why
 
 # spec: tests/main.bats -- room is checked before each download or build, never after
 build_base() {
+  # spec: tests/main.bats -- the base image's installer media is built in the plugin's microVM,
+  #       which loads hfsplus into the running kernel; install-tools.sh found none to load
+  #       (MVM_NO_HFSPLUS), so the build would fail late, mounting the installer: it stops here
+  if [ -n "${MVM_NO_HFSPLUS:-}" ]; then
+    echo "::error title=mavericks-vm::building the base image needs the hfsplus module for the plugin's media microVM, and the running kernel, $MVM_NO_HFSPLUS, has none, nor linux-modules-extra-$MVM_NO_HFSPLUS in the archive; booting another kernel takes a packer-plugin-macosx release with privops' kernel choice (chooseRelease), which the pinned one is not"
+    exit 1
+  fi
   step space.sh miss || exit 1
   step build.sh mavericks "$box" || die "building the base image"
   { od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; echo; } > "$box/image-id" || die "recording the base image's image-id"

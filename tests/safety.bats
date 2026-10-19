@@ -101,21 +101,122 @@ PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
 
-@test "install-tools installs what the plugin builds with, and lets the plugin read the running kernel" {
-    # A sudo of this test's own that only logs: apt-get and chmod must never reach the real one.
+# A runner of the test's own, ahead of the stubs on PATH, so that nothing reaches the real system:
+# a sudo that only logs and runs nothing, uname -r printing FAKE_RELEASE, and apt-cache knowing
+# FAKE_APT_HAS's packages. None of them writes anything but the log, in this test's tmp dir.
+# FAKE_STALL_UPDATE hangs apt-get update every time, and FAKE_STALL_INSTALL_ONCE the first
+# apt-get install, as a stalled mirror would.
+fake_runner() {
     fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
-    printf '#!/bin/sh\nprintf "sudo %%s\\n" "$*" >> "%s/sudo.log"\n' "$BATS_TEST_TMPDIR" > "$fake/sudo"
-    chmod +x "$fake/sudo"
-    printf 'not the release' > "$BATS_TEST_TMPDIR/bad.tgz"
-    PATH="$fake:$PATH" STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/bad.tgz" MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" \
-        run bash "$REPO/scripts/install-tools.sh"
-    install="$(grep '^sudo apt-get .* install ' "$BATS_TEST_TMPDIR/sudo.log" | tr '\n' ' ')"
+    export PATH="$fake:$PATH" FAKE_LOG="$BATS_TEST_TMPDIR/sudo.log" MVM_MODULES_DIR="$BATS_TEST_TMPDIR/modules"
+    export MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/bad.tgz"
+    export GITHUB_ENV="$BATS_TEST_TMPDIR/github-env"
+    printf 'not the release' > "$STUB_TEMPLATE_ZIP"
+    : > "$FAKE_LOG"; : > "$GITHUB_ENV"
+    cat > "$fake/sudo" <<'X'
+#!/bin/bash
+printf 'sudo %s\n' "$*" >> "$FAKE_LOG"
+case "$*" in
+  *apt-get*" update"*)
+    [ -z "${FAKE_STALL_UPDATE:-}" ] || { echo "Ign:1 http://azure.archive.ubuntu.com"; sleep 30; } ;;
+  *apt-get*" install "*)
+    [ -z "${FAKE_STALL_INSTALL_ONCE:-}" ] || [ -e "$FAKE_LOG.stalled" ] || { : > "$FAKE_LOG.stalled"; sleep 30; } ;;
+esac
+exit 0
+X
+    cat > "$fake/uname" <<'X'
+#!/bin/sh
+[ "$*" = -r ] || { echo "fake uname: only -r" >&2; exit 1; }
+echo "$FAKE_RELEASE"
+X
+    cat > "$fake/apt-cache" <<'X'
+#!/bin/bash
+[ "$1" = show ] || { echo "fake apt-cache: not $1" >&2; exit 1; }
+for p in ${FAKE_APT_HAS:-}; do [ "$p" != "$2" ] || { echo "Package: $p"; exit 0; }; done
+echo "E: No packages found" >&2; exit 100
+X
+    chmod +x "$fake/sudo" "$fake/uname" "$fake/apt-cache"
+}
+
+# kernel_tree <release> module|builtin|none: the release's module tree, Ubuntu's Azure layout, with
+# hfsplus a module, built in, or neither (6.17's without linux-modules-extra)
+kernel_tree() {
+    local d="$MVM_MODULES_DIR/$1"
+    mkdir -p "$d/kernel/fs/nls"
+    : > "$d/kernel/fs/nls/nls_utf8.ko.zst"
+    printf 'kernel/fs/nls/nls_base.ko\nkernel/drivers/virtio/virtio_blk.ko\n' > "$d/modules.builtin"
+    case "$2" in
+      module) mkdir -p "$d/kernel/fs/hfsplus"; : > "$d/kernel/fs/hfsplus/hfsplus.ko.zst" ;;
+      builtin) echo kernel/fs/hfsplus/hfsplus.ko >> "$d/modules.builtin" ;;
+    esac
+}
+
+@test "install-tools installs what the plugin builds with, and lets the plugin read the running kernel" {
+    fake_runner
+    export FAKE_RELEASE=7.0.0-1017-azure; kernel_tree "$FAKE_RELEASE" module
+    run bash "$REPO/scripts/install-tools.sh"
+    install="$(grep '^sudo apt-get .* install ' "$FAKE_LOG" | tr '\n' ' ')"
     for pkg in nasm acpica-tools uuid-dev dmg2img hfsprogs busybox-static; do
         [[ " $install " == *" $pkg "* ]] || { echo "not installed: $pkg"; false; }
     done
-    grep -qxF "sudo chmod 644 /boot/vmlinuz-$(uname -r)" "$BATS_TEST_TMPDIR/sudo.log"
-    grep -q "^sudo apt-get .* install .*linux-modules-extra-$(uname -r)" "$BATS_TEST_TMPDIR/sudo.log"
-    grep -qxF "sudo tee /sys/module/kvm/parameters/ignore_msrs" "$BATS_TEST_TMPDIR/sudo.log"
+    grep -qxF "sudo chmod 644 /boot/vmlinuz-7.0.0-1017-azure" "$FAKE_LOG"
+    grep -qxF "sudo tee /sys/module/kvm/parameters/ignore_msrs" "$FAKE_LOG"
+}
+
+# spec: the plugin's microVM boots a kernel of the runner's and loads hfsplus into it. Ubuntu's
+#       Azure kernels through 6.17 keep hfsplus in linux-modules-extra-<release>; 7.0's have no such
+#       package, and hfsplus is in linux-modules-<release>, which every kernel has (runner image
+#       ubuntu24/20261018.339 asked for linux-modules-extra-7.0.0-1017-azure, which does not exist:
+#       Mavergreen/longboat Actions run 39311778407). What is installed follows from what the
+#       running kernel lacks, never from a package name alone.
+@test "install-tools: a running kernel with hfsplus, a module or built in, gets no kernel package" {
+    fake_runner
+    for how in module builtin; do
+        export FAKE_RELEASE="7.0.0-1017-$how"; kernel_tree "$FAKE_RELEASE" "$how"; : > "$FAKE_LOG"; : > "$STUB_LOG"
+        run bash "$REPO/scripts/install-tools.sh"
+        ! grep -E 'linux-(modules|image)|dpkg-deb|depmod' "$FAKE_LOG" || { echo "$how: a kernel package"; false; }
+        grep -q '^curl ' "$STUB_LOG" || { echo "$how: stopped before the downloads: $output"; false; }
+        [[ "$output" == *"install-tools: the running kernel, $FAKE_RELEASE, has hfsplus: no kernel package to install"* ]] \
+            || { echo "$how: $output"; false; }
+    done
+}
+
+@test "install-tools: a running kernel without hfsplus gets its linux-modules-extra, when the archive has it" {
+    fake_runner
+    export FAKE_RELEASE=6.17.0-1022-azure FAKE_APT_HAS=linux-modules-extra-6.17.0-1022-azure
+    kernel_tree "$FAKE_RELEASE" none
+    run bash "$REPO/scripts/install-tools.sh"
+    grep -q '^sudo apt-get .* install .*linux-modules-extra-6.17.0-1022-azure$' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    ! grep -E ' download |dpkg-deb' "$FAKE_LOG" || false
+    [[ "$output" == *"the running kernel, 6.17.0-1022-azure, has no hfsplus; installing linux-modules-extra-6.17.0-1022-azure, which has it, before this run knows whether it builds the base image"* ]] || false
+}
+
+# spec: Ubuntu's Azure kernels through 6.17 keep hfsplus in linux-modules-extra-<release>, and a
+#       runner whose kernel lacks it, with no -extra in the archive, could only get it by booting
+#       another kernel, which the pinned plugin never does (packer-plugin-macosx's privops
+#       chooseRelease comes in a later release). So the step names it and lets the run go on: a
+#       run that never builds the base image never needs it, and main.sh stops one that does.
+@test "install-tools: a running kernel without hfsplus that the archive cannot make up for is named, and the run goes on" {
+    fake_runner
+    export FAKE_RELEASE=6.17.0-1022-azure
+    kernel_tree "$FAKE_RELEASE" none
+    run bash "$REPO/scripts/install-tools.sh"
+    [[ "$output" == *"::warning title=mavericks-vm::the running kernel, 6.17.0-1022-azure, has no hfsplus module, and the archive has no linux-modules-extra-6.17.0-1022-azure: building the base image here would fail, so this run stops if it must build one"* ]] || { echo "$output"; false; }
+    grep -qxF "MVM_NO_HFSPLUS=6.17.0-1022-azure" "$GITHUB_ENV" || { cat "$GITHUB_ENV"; false; }
+    ! grep -E 'linux-(modules|image)|dpkg-deb|depmod' "$FAKE_LOG" || false
+    grep -q '^curl ' "$STUB_LOG" || { echo "stopped before the downloads: $output"; false; }
+}
+
+@test "install-tools: a running kernel with hfsplus leaves the run free to build the base image" {
+    fake_runner
+    for how in module builtin; do
+        export FAKE_RELEASE="7.0.0-1017-$how"; kernel_tree "$FAKE_RELEASE" "$how"; : > "$GITHUB_ENV"
+        run bash "$REPO/scripts/install-tools.sh"
+        ! grep -q MVM_NO_HFSPLUS "$GITHUB_ENV" || { echo "$how: $(cat "$GITHUB_ENV")"; false; }
+    done
+    export FAKE_RELEASE=6.17.0-1022-azure FAKE_APT_HAS=linux-modules-extra-6.17.0-1022-azure; kernel_tree "$FAKE_RELEASE" none
+    run bash "$REPO/scripts/install-tools.sh"
+    ! grep -q MVM_NO_HFSPLUS "$GITHUB_ENV" || { echo "extra: $(cat "$GITHUB_ENV")"; false; }
 }
 
 @test "install-tools pins age, oras and packer by sha256, and refuses other bytes" {
@@ -161,52 +262,43 @@ PY
 #       Actions run 37672419741); each step now says what it is, and one that stalls is cut off,
 #       named, with what it printed
 @test "install-tools: an apt step that stalls every time is cut off, tried again, and named" {
-    fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
-    # This test's own sudo: logs, and hangs on apt-get update as a stalled mirror would.
-    printf '#!/bin/sh\nprintf "sudo %%s\\n" "$*" >> "%s/sudo.log"\ncase "$*" in *apt-get*update*) echo "Ign:1 http://azure.archive.ubuntu.com"; sleep 30 ;; esac\n' \
-        "$BATS_TEST_TMPDIR" > "$fake/sudo"
-    chmod +x "$fake/sudo"
+    fake_runner
+    export FAKE_RELEASE=7.0.0-1017-azure FAKE_STALL_UPDATE=1; kernel_tree "$FAKE_RELEASE" module
     start=$SECONDS
-    PATH="$fake:$PATH" MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" MVM_APT_TIMEOUT=2 MVM_APT_TRIES=2 \
-        run bash "$REPO/scripts/install-tools.sh"
+    MVM_APT_TIMEOUT=2 MVM_APT_TRIES=2 run bash "$REPO/scripts/install-tools.sh"
     [ "$status" -ne 0 ]
     [ $((SECONDS - start)) -le 12 ] || { echo "took $((SECONDS - start))s"; false; }
-    [ "$(grep -c 'apt-get .*update' "$BATS_TEST_TMPDIR/sudo.log")" -eq 2 ] || { cat "$BATS_TEST_TMPDIR/sudo.log"; false; }
+    [ "$(grep -c 'apt-get .*update' "$FAKE_LOG")" -eq 2 ] || { cat "$FAKE_LOG"; false; }
     [[ "$output" == *"apt-get update did not finish in 2s, 2 times"* ]] || false
     [[ "$output" == *"Ign:1 http://azure.archive.ubuntu.com"* ]] || false
 }
 
-# spec: apt's install of linux-modules-extra takes 12-22 s on GitHub's runners, and on 2026-10-08
+# spec: apt's install of linux-modules-extra took 12-22 s on GitHub's runners, and on 2026-10-08
 #       twice printed nothing for the whole 600 s (runs 37833815882 and 37836734837), each
-#       costing a rerun of the job; a stall is cut off sooner and tried again, after dpkg finishes
-#       whatever the killed attempt left half done
+#       costing a rerun of the job; a stalled apt install is cut off sooner and tried again, after
+#       dpkg finishes whatever the killed attempt left half done
 @test "install-tools: an apt install that stalls once is tried again, and the run goes on" {
-    fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
-    printf '#!/bin/sh\nprintf "sudo %%s\\n" "$*" >> "%s/sudo.log"\ncase "$*" in *install*linux-modules-extra*) [ -e "%s/stalled" ] || { : > "%s/stalled"; sleep 30; } ;; esac\n' \
-        "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" > "$fake/sudo"
-    chmod +x "$fake/sudo"
-    printf 'not the release' > "$BATS_TEST_TMPDIR/bad.tgz"
-    PATH="$fake:$PATH" STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/bad.tgz" MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" \
-        MVM_APT_TIMEOUT=2 run bash "$REPO/scripts/install-tools.sh"
-    log="$BATS_TEST_TMPDIR/sudo.log"
-    [ "$(grep -c 'install .*linux-modules-extra' "$log")" -eq 2 ] || { cat "$log"; false; }
+    fake_runner
+    export FAKE_RELEASE=7.0.0-1017-azure FAKE_STALL_INSTALL_ONCE=1; kernel_tree "$FAKE_RELEASE" module
+    MVM_APT_TIMEOUT=2 run bash "$REPO/scripts/install-tools.sh"
+    [ "$(grep -c ' install .*qemu-system-x86' "$FAKE_LOG")" -eq 2 ] || { cat "$FAKE_LOG"; false; }
     # dpkg is set straight between the two attempts
-    sed -n '/linux-modules-extra/,$p' "$log" | sed -n 2p | grep -qF 'sudo dpkg --configure -a' || { cat "$log"; false; }
-    [[ "$output" == *"linux-modules-extra"*"did not finish in 2s; trying again (2 of 3)"* ]] || false
+    sed -n '/ install /,$p' "$FAKE_LOG" | sed -n 2p | grep -qF 'sudo dpkg --configure -a' || { cat "$FAKE_LOG"; false; }
+    [[ "$output" == *"QEMU and the plugin's build tools did not finish in 2s; trying again (2 of 3)"* ]] || false
     # and the run went on past apt
-    grep -qxF "sudo tee /sys/module/kvm/parameters/ignore_msrs" "$log" || { cat "$log"; false; }
+    grep -qxF "sudo tee /sys/module/kvm/parameters/ignore_msrs" "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
 }
 
 @test "install-tools: apt waits for its lock and its mirrors only so long, and curl too" {
-    fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
-    printf '#!/bin/sh\nprintf "sudo %%s\\n" "$*" >> "%s/sudo.log"\n' "$BATS_TEST_TMPDIR" > "$fake/sudo"
-    chmod +x "$fake/sudo"
-    printf 'not the release' > "$BATS_TEST_TMPDIR/bad.tgz"
-    PATH="$fake:$PATH" STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/bad.tgz" MVM_TOOLS_DIR="$BATS_TEST_TMPDIR/tools" \
-        run bash "$REPO/scripts/install-tools.sh"
+    fake_runner
+    # the longest path through apt: the running kernel's linux-modules-extra
+    export FAKE_RELEASE=6.17.0-1022-azure FAKE_APT_HAS=linux-modules-extra-6.17.0-1022-azure
+    kernel_tree "$FAKE_RELEASE" none
+    run bash "$REPO/scripts/install-tools.sh"
+    [ "$(grep -c '^sudo apt-get' "$FAKE_LOG")" -eq 3 ] || { cat "$FAKE_LOG"; false; }
     while read -r line; do
         [[ "$line" == *"-o DPkg::Lock::Timeout="* && "$line" == *"-o Acquire::http::Timeout="* ]] \
             || { echo "unbounded: $line"; false; }
-    done < <(grep '^sudo apt-get' "$BATS_TEST_TMPDIR/sudo.log")
+    done < <(grep '^sudo apt-get' "$FAKE_LOG")
     grep -q '^curl-args .*--connect-timeout [0-9]* .*--max-time [0-9]*' "$STUB_LOG"
 }

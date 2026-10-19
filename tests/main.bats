@@ -123,6 +123,24 @@ PREPARE_AGAIN="key.sh --recipe key.sh --prepared key.sh --layer key.sh --base sp
     [ "$(boots)" = "boot.sh layer" ]
 }
 
+# spec: tests/safety.bats -- install-tools.sh found no hfsplus for the plugin's media microVM
+#       (MVM_NO_HFSPLUS): a run that must build the base image stops there, naming why, before it
+#       makes room or builds anything; a run that pulls its base, or builds only the layer over
+#       it, needs no hfsplus and goes on
+@test "with no hfsplus on the runner, a base miss stops before the build, naming why, and a hit goes on" {
+    export MVM_NO_HFSPLUS=6.17.0-1022-azure
+    drop layer
+    run main
+    [ "$status" -eq 0 ] || { echo "layer miss over a base hit: $output"; false; }
+    [ "$(order)" = "$REBUILD_LAYER" ]
+    seed layer; drop base; : > "$CALLS"
+    run main
+    [ "$status" -eq 1 ] || { echo "$output"; false; }
+    [[ "$output" == *"::error title=mavericks-vm::building the base image needs the hfsplus module for the plugin's media microVM, and the running kernel, 6.17.0-1022-azure, has none, nor linux-modules-extra-6.17.0-1022-azure in the archive; booting another kernel takes a packer-plugin-macosx release with privops' kernel choice (chooseRelease), which the pinned one is not"* ]] || { echo "$output"; false; }
+    [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$output"; false; }
+    ! grep -E '^(build\.sh|space\.sh miss)' "$CALLS" || false
+}
+
 @test "a layer miss with a base hit: build the layer over the pulled base, push it, boot it" {
     drop layer
     run main

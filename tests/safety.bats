@@ -104,8 +104,8 @@ PY
 # A runner of the test's own, ahead of the stubs on PATH, so that nothing reaches the real system:
 # a sudo that only logs and runs nothing, uname -r printing FAKE_RELEASE, and apt-cache knowing
 # FAKE_APT_HAS's packages. None of them writes anything but the log, in this test's tmp dir.
-# FAKE_STALL_UPDATE hangs apt-get update every time, and FAKE_STALL_INSTALL_ONCE the first
-# apt-get install, as a stalled mirror would.
+# FAKE_STALL_UPDATE hangs apt-get update every time, FAKE_STALL_INSTALL_ONCE the first
+# apt-get install, and FAKE_STALL_EXTRA every install of linux-modules-extra, as a stalled mirror would.
 fake_runner() {
     fake="$BATS_TEST_TMPDIR/fake"; mkdir -p "$fake"
     export PATH="$fake:$PATH" FAKE_LOG="$BATS_TEST_TMPDIR/sudo.log" MVM_MODULES_DIR="$BATS_TEST_TMPDIR/modules"
@@ -121,6 +121,10 @@ case "$*" in
     [ -z "${FAKE_STALL_UPDATE:-}" ] || { echo "Ign:1 http://azure.archive.ubuntu.com"; sleep 30; } ;;
   *apt-get*" install "*)
     [ -z "${FAKE_STALL_INSTALL_ONCE:-}" ] || [ -e "$FAKE_LOG.stalled" ] || { : > "$FAKE_LOG.stalled"; sleep 30; } ;;
+esac
+case "$*" in
+  *apt-get*" install "*linux-modules-extra-*)
+    [ -z "${FAKE_STALL_EXTRA:-}" ] || { echo "0% [Waiting for headers]"; sleep 30; } ;;
 esac
 exit 0
 X
@@ -204,6 +208,21 @@ kernel_tree() {
     [[ "$output" == *"::warning title=mavericks-vm::the running kernel, 6.17.0-1022-azure, has no hfsplus module, and the archive has no linux-modules-extra-6.17.0-1022-azure: building the base image here would fail, so this run stops if it must build one"* ]] || { echo "$output"; false; }
     grep -qxF "MVM_NO_HFSPLUS=6.17.0-1022-azure" "$GITHUB_ENV" || { cat "$GITHUB_ENV"; false; }
     ! grep -E 'linux-(modules|image)|dpkg-deb|depmod' "$FAKE_LOG" || false
+    grep -q '^curl ' "$STUB_LOG" || { echo "stopped before the downloads: $output"; false; }
+}
+
+# spec: the install of linux-modules-extra stalled 3 times on 2026-10-26 (Mavergreen/longboat
+#       Actions run 40250148980) in a run with a cached base image, which needs no hfsplus
+@test "install-tools: a linux-modules-extra install that keeps stalling is named, and the run goes on" {
+    fake_runner
+    export FAKE_RELEASE=6.17.0-1022-azure FAKE_APT_HAS=linux-modules-extra-6.17.0-1022-azure FAKE_STALL_EXTRA=1
+    kernel_tree "$FAKE_RELEASE" none
+    MVM_APT_TIMEOUT=2 MVM_APT_TRIES=2 run bash "$REPO/scripts/install-tools.sh"
+    [ "$(grep -c ' install .*linux-modules-extra-6.17.0-1022-azure$' "$FAKE_LOG")" -eq 2 ] || { cat "$FAKE_LOG"; false; }
+    [[ "$output" == *"::warning title=mavericks-vm::apt-get install of linux-modules-extra-6.17.0-1022-azure did not finish in 2s, 2 times, so the running kernel has no hfsplus module: building the base image here would fail, so this run stops if it must build one"* ]] || { echo "$output"; false; }
+    [[ "$output" == *"0% [Waiting for headers]"* ]] || false
+    [[ "$output" != *"::error"* ]] || { echo "$output"; false; }
+    grep -qxF "MVM_NO_HFSPLUS=6.17.0-1022-azure" "$GITHUB_ENV" || { cat "$GITHUB_ENV"; false; }
     grep -q '^curl ' "$STUB_LOG" || { echo "stopped before the downloads: $output"; false; }
 }
 

@@ -47,20 +47,25 @@ step() {  # $1 = what it is, then the command
 #       try, and dpkg finishes, between tries, whatever the killed attempt left half done.
 apt_limit="${MVM_APT_TIMEOUT:-180}"
 apt_tries="${MVM_APT_TRIES:-3}"
-apt_step() {  # $1 = what it is, then apt-get's arguments
-  local what="$1" out rc i why; shift
+apt_try() {  # $1 = what it is, then apt-get's arguments; on failure, apt_why and apt_out say why
+  local what="$1" rc i; shift
   echo "install-tools: $what"
   for ((i = 1; i <= apt_tries; i++)); do
     rc=0
-    out="$(timeout "$apt_limit" sudo apt-get "${apt_opts[@]}" "$@" 2>&1)" || rc=$?
+    apt_out="$(timeout "$apt_limit" sudo apt-get "${apt_opts[@]}" "$@" 2>&1)" || rc=$?
     [ "$rc" -eq 0 ] && return 0
-    if [ "$rc" -eq 124 ]; then why="did not finish in ${apt_limit}s"; else why="failed (exit $rc)"; fi
+    if [ "$rc" -eq 124 ]; then apt_why="did not finish in ${apt_limit}s"; else apt_why="failed (exit $rc)"; fi
     [ "$i" -lt "$apt_tries" ] || break
-    echo "install-tools: $what $why; trying again ($((i + 1)) of $apt_tries)"
+    echo "install-tools: $what $apt_why; trying again ($((i + 1)) of $apt_tries)"
     timeout "$apt_limit" sudo dpkg --configure -a > /dev/null 2>&1 || true
   done
-  echo "::error title=mavericks-vm::$what $why, $apt_tries times; what the last try printed:"
-  printf '%s\n' "$out"
+  apt_why="$apt_why, $apt_tries times"
+  return 1
+}
+apt_step() {
+  apt_try "$@" && return 0
+  echo "::error title=mavericks-vm::$1 $apt_why; what the last try printed:"
+  printf '%s\n' "$apt_out"
   exit 1
 }
 
@@ -83,8 +88,14 @@ kernel_with_hfsplus() {  # for the running release $rel: hfsplus a module in its
   #       image, the only build that needs hfsplus (for its installer media), and says so
   if apt-cache show "linux-modules-extra-$rel" > /dev/null 2>&1; then
     echo "install-tools: the running kernel, $rel, has no hfsplus; installing linux-modules-extra-$rel, which has it, before this run knows whether it builds the base image"
-    apt_step "apt-get install of linux-modules-extra-$rel" \
-      install -y -qq --no-install-recommends "linux-modules-extra-$rel"
+    # spec: tests/safety.bats -- the install stalled 3 times on 2026-10-26 (Mavergreen/longboat
+    #       Actions run 40250148980) in a run with a cached base image, which needs no hfsplus;
+    #       so a failed install, like a missing package, leaves main.sh to stop only a base build
+    apt_try "apt-get install of linux-modules-extra-$rel" \
+      install -y -qq --no-install-recommends "linux-modules-extra-$rel" && return
+    echo "::warning title=mavericks-vm::apt-get install of linux-modules-extra-$rel $apt_why, so the running kernel has no hfsplus module: building the base image here would fail, so this run stops if it must build one; what the last try printed:"
+    printf '%s\n' "$apt_out"
+    echo "MVM_NO_HFSPLUS=$rel" >> "${GITHUB_ENV:-/dev/null}"
     return
   fi
   # spec: tests/main.bats -- nothing else here can supply it: the pinned plugin boots only the

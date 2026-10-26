@@ -136,7 +136,7 @@ PREPARE_AGAIN="key.sh --recipe key.sh --prepared key.sh --layer key.sh --base sp
     seed layer; drop base; : > "$CALLS"
     run main
     [ "$status" -eq 1 ] || { echo "$output"; false; }
-    [[ "$output" == *"::error title=mavericks-vm::building the base image needs the hfsplus module for the plugin's media microVM, and the running kernel, 6.17.0-1022-azure, has none, nor linux-modules-extra-6.17.0-1022-azure in the archive; booting another kernel takes a packer-plugin-macosx release with privops' kernel choice (chooseRelease), which the pinned one is not"* ]] || { echo "$output"; false; }
+    [[ "$output" == *"::error title=mavericks-vm::building the base image needs the hfsplus module for the plugin's media microVM, and install-tools.sh found none for the running kernel, 6.17.0-1022-azure (its warning says why); booting another kernel takes a packer-plugin-macosx release with privops' kernel choice (chooseRelease), which the pinned one is not"* ]] || { echo "$output"; false; }
     [ "$(grep -c '::error' <<< "$output")" -eq 1 ] || { echo "$output"; false; }
     ! grep -E '^(build\.sh|space\.sh miss)' "$CALLS" || false
 }

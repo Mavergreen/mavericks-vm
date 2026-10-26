@@ -116,7 +116,7 @@ build_base() {
   #       which loads hfsplus into the running kernel; install-tools.sh found none to load
   #       (MVM_NO_HFSPLUS), so the build would fail late, mounting the installer: it stops here
   if [ -n "${MVM_NO_HFSPLUS:-}" ]; then
-    echo "::error title=mavericks-vm::building the base image needs the hfsplus module for the plugin's media microVM, and the running kernel, $MVM_NO_HFSPLUS, has none, nor linux-modules-extra-$MVM_NO_HFSPLUS in the archive; booting another kernel takes a packer-plugin-macosx release with privops' kernel choice (chooseRelease), which the pinned one is not"
+    echo "::error title=mavericks-vm::building the base image needs the hfsplus module for the plugin's media microVM, and install-tools.sh found none for the running kernel, $MVM_NO_HFSPLUS (its warning says why); booting another kernel takes a packer-plugin-macosx release with privops' kernel choice (chooseRelease), which the pinned one is not"
     exit 1
   fi
   step space.sh miss || exit 1

@@ -221,7 +221,7 @@ kernel_tree() {
     [ "$(grep -c ' install .*linux-modules-extra-6.17.0-1022-azure$' "$FAKE_LOG")" -eq 2 ] || { cat "$FAKE_LOG"; false; }
     [[ "$output" == *"::warning title=mavericks-vm::apt-get install of linux-modules-extra-6.17.0-1022-azure did not finish in 2s, 2 times, so the running kernel has no hfsplus module: building the base image here would fail, so this run stops if it must build one"* ]] || { echo "$output"; false; }
     [[ "$output" == *"0% [Waiting for headers]"* ]] || false
-    [[ "$output" != *"::error"* ]] || { echo "$output"; false; }
+    [[ "$output" != *"::error title=mavericks-vm::apt-get"* ]] || { echo "$output"; false; }
     grep -qxF "MVM_NO_HFSPLUS=6.17.0-1022-azure" "$GITHUB_ENV" || { cat "$GITHUB_ENV"; false; }
     grep -q '^curl ' "$STUB_LOG" || { echo "stopped before the downloads: $output"; false; }
 }

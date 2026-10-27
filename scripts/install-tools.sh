@@ -1,13 +1,22 @@
 #!/bin/bash
 # platform: GitHub's Linux runners only (Ubuntu's apt, bash) -- this Action runs nowhere else
-#   usage: install-tools.sh
-#          env in:  MVM_TOOLS_DIR (default $RUNNER_TEMP/mavericks-vm-tools); MVM_SKIP_APT and
-#                   MVM_MODULES_DIR (/lib/modules) (tests); MVM_APT_TIMEOUT (180) and MVM_APT_TRIES
-#                   (3), per apt step; MVM_INSTALL_TIMEOUT (600)
+#   usage: install-tools.sh | install-tools.sh --packages (prints the apt packages, one a line, for
+#          the cache key of their .debs)
+#          env in:  MVM_TOOLS_DIR (default $RUNNER_TEMP/mavericks-vm-tools); MVM_DEBS_DIR (the
+#                   .debs actions/cache keeps for this runner image; unset, apt fetches every run);
+#                   MVM_SKIP_APT and MVM_MODULES_DIR (/lib/modules) (tests); MVM_APT_TIMEOUT (180)
+#                   and MVM_APT_TRIES (3), per apt step; MVM_INSTALL_TIMEOUT (600)
 #          out:     QEMU, zstd and rsync from apt; hfsplus for the running kernel when it lacks it
 #                   and the archive has it, and otherwise MVM_NO_HFSPLUS=<release> in $GITHUB_ENV;
-#                   age, oras and packer, each its pinned release checked by sha256, on the job's PATH
+#                   age, oras and packer, each its pinned release checked by sha256, on the job's PATH;
+#                   debs-save=true in $GITHUB_OUTPUT when it fetched the .debs for actions/cache to keep
 set -euo pipefail
+
+# platform: what packer-plugin-macosx builds with beyond the runner image -- nasm, iasl and
+#           uuid.h for OpenCore and OVMF, dmg2img and mkfs.hfsplus for the media, busybox for
+#           its microVM (seen missing 2026-10-06, this repo's Actions runs 37490378092 and 37499515340)
+pkgs=(qemu-system-x86 qemu-utils zstd rsync unzip nasm acpica-tools uuid-dev dmg2img hfsprogs busybox-static)
+if [ "${1:-}" = --packages ]; then printf '%s\n' "${pkgs[@]}"; exit 0; fi
 
 # spec: INGREDIENTS.md -- age, oras and packer are pinned here; QEMU, zstd and rsync are the
 #       runner's apt's (untrackable)
@@ -52,7 +61,8 @@ apt_try() {  # $1 = what it is, then apt-get's arguments; on failure, apt_why an
   echo "install-tools: $what"
   for ((i = 1; i <= apt_tries; i++)); do
     rc=0
-    apt_out="$(timeout "$apt_limit" sudo apt-get "${apt_opts[@]}" "$@" 2>&1)" || rc=$?
+    # spec: tests/safety.bats -- line-buffered, so what a killed apt had printed is not lost
+    apt_out="$(timeout "$apt_limit" sudo stdbuf -oL -eL apt-get "${apt_opts[@]}" "$@" 2>&1)" || rc=$?
     [ "$rc" -eq 0 ] && return 0
     if [ "$rc" -eq 124 ]; then apt_why="did not finish in ${apt_limit}s"; else apt_why="failed (exit $rc)"; fi
     [ "$i" -lt "$apt_tries" ] || break
@@ -92,7 +102,7 @@ kernel_with_hfsplus() {  # for the running release $rel: hfsplus a module in its
     #       Actions run 40250148980) in a run with a cached base image, which needs no hfsplus;
     #       so a failed install, like a missing package, leaves main.sh to stop only a base build
     apt_try "apt-get install of linux-modules-extra-$rel" \
-      install -y -qq --no-install-recommends "linux-modules-extra-$rel" && return
+      install -y -q --no-install-recommends "linux-modules-extra-$rel" && return
     echo "::warning title=mavericks-vm::apt-get install of linux-modules-extra-$rel $apt_why, so the running kernel has no hfsplus module: building the base image here would fail, so this run stops if it must build one; what the last try printed:"
     printf '%s\n' "$apt_out"
     echo "MVM_NO_HFSPLUS=$rel" >> "${GITHUB_ENV:-/dev/null}"
@@ -106,14 +116,57 @@ kernel_with_hfsplus() {  # for the running release $rel: hfsplus a module in its
   echo "MVM_NO_HFSPLUS=$rel" >> "${GITHUB_ENV:-/dev/null}"
 }
 
-if [ -z "${MVM_SKIP_APT:-}" ]; then
+# spec: tests/safety.bats -- on 2026-10-26 one runner in six got the archive's .debs at ~70 kB/s
+#       while the others got 15-37 MB/s (the slow ones' index fetch ran at ~9 MB/s), so the 20 MB
+#       install ran past apt_limit three times running, and apt's own timeouts never fire on a
+#       trickle (this repo's self-test run 40382445949, apt-probe run 40425490693). So the .debs
+#       this runner image lacks are kept in actions/cache, keyed by the image and this package list
+#       (action.yml): a hit installs them with no mirror at all; a miss fetches them once, into
+#       MVM_DEBS_DIR, for the action to save. -q, not -qq: a timeout then shows the download it was on.
+debs="${MVM_DEBS_DIR:-}"
+# spec: tests/safety.bats -- offline means apt has no sources at all, so it can only use the files
+#       it is given: measured on the runners (apt-probe run of c17f32d), --no-download refuses local
+#       .debs ("Unable to fetch some archives"), and a plain install of them fetches all 20 MB again
+debs_install() {  # the .debs in $debs, offline; on failure, apt_why and apt_out say why
+  local f=("$debs"/*.deb)
+  [ -e "${f[0]}" ] || return 0
+  apt_try "apt-get install of QEMU and the plugin's build tools" \
+    install -y -q --no-install-recommends -o Dir::Etc::SourceList=/dev/null -o Dir::Etc::SourceParts=/nonexistent "${f[@]}"
+}
+from_archive() {
   apt_step "apt-get update" update -qq
-  # platform: what packer-plugin-macosx builds with beyond the runner image -- nasm, iasl and
-  #           uuid.h for OpenCore and OVMF, dmg2img and mkfs.hfsplus for the media, busybox for
-  #           its microVM (seen missing 2026-10-06, this repo's Actions runs 37490378092 and 37499515340)
-  apt_step "apt-get install of QEMU and the plugin's build tools" \
-    install -y -qq --no-install-recommends qemu-system-x86 qemu-utils \
-    zstd rsync unzip nasm acpica-tools uuid-dev dmg2img hfsprogs busybox-static
+  if [ -z "$debs" ]; then
+    apt_step "apt-get install of QEMU and the plugin's build tools" \
+      install -y -q --no-install-recommends "${pkgs[@]}"
+    return
+  fi
+  echo "install-tools: no apt packages cached for this runner image: fetching them from the archive, for actions/cache to keep"
+  rm -rf "$debs" && mkdir -p "$debs/partial"
+  apt_step "apt-get download of QEMU and the plugin's build tools" \
+    install -y -q --no-install-recommends --download-only -o "Dir::Cache::Archives=$debs" "${pkgs[@]}"
+  # spec: tests/safety.bats -- apt's lock is root's alone, and actions/cache could not read it
+  sudo rm -rf "$debs/lock" "$debs/partial"
+  if ! debs_install; then
+    echo "::error title=mavericks-vm::apt-get install of QEMU and the plugin's build tools $apt_why; what the last try printed:"
+    printf '%s\n' "$apt_out"
+    exit 1
+  fi
+  printf '%s\n' "${pkgs[@]}" > "$debs/packages"
+  echo "debs-save=true" >> "${GITHUB_OUTPUT:-/dev/null}"
+}
+
+if [ -z "${MVM_SKIP_APT:-}" ]; then
+  if [ -n "$debs" ] && [ "$(cat "$debs/packages" 2> /dev/null)" = "$(printf '%s\n' "${pkgs[@]}")" ]; then
+    n="$(find "$debs" -maxdepth 1 -name '*.deb' | wc -l)"
+    echo "install-tools: installing the $n apt packages cached for this runner image, with no download"
+    if ! debs_install; then
+      echo "::warning title=mavericks-vm::the apt packages cached for this runner image did not install offline ($apt_why), so they are fetched from the archive again; what apt printed:"
+      printf '%s\n' "$apt_out"
+      from_archive
+    fi
+  else
+    from_archive
+  fi
   # platform: GitHub's runner user is not in the kvm group; the device is root-only by default
   sudo chmod 666 /dev/kvm
   # platform: a cpu-model of Nehalem or later makes 10.9's kernel read MSR_FLEX_RATIO (0x194) at

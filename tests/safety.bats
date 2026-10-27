@@ -123,6 +123,20 @@ case "$*" in
     [ -z "${FAKE_STALL_INSTALL_ONCE:-}" ] || [ -e "$FAKE_LOG.stalled" ] || { : > "$FAKE_LOG.stalled"; sleep 30; } ;;
 esac
 case "$*" in
+  # a download into a cache dir leaves a .deb there, and the lock and partial/ apt keeps beside them
+  *apt-get*"--download-only"*"Dir::Cache::Archives="*)
+    a="$*"; d="${a##*Dir::Cache::Archives=}"; d="${d%% *}"
+    case "$d" in "$(dirname "$FAKE_LOG")"/*) ;; *) echo "fake sudo: $d is outside this test's tmp dir" >&2; exit 1 ;; esac
+    mkdir -p "$d/partial"; : > "$d/lock"; : > "$d/qemu-system-x86_1_amd64.deb" ;;
+  # the lock and partial/ apt leaves are root's: removed, here only inside this test's tmp dir
+  "rm -rf "*)
+    t="$(dirname "$FAKE_LOG")"
+    for p in "${@:3}"; do case "$p" in "$t"/*) [[ "$p" != *..* ]] && rm -rf -- "$p" ;; esac; done ;;
+  # a cached .deb that will not install offline, as one a moved archive no longer matches would not
+  *apt-get*"Dir::Etc::SourceList=/dev/null"*)
+    [ -z "${FAKE_CACHED_DEBS_FAIL:-}" ] || { echo "E: Unable to fetch some archives"; exit 100; } ;;
+esac
+case "$*" in
   *apt-get*" install "*linux-modules-extra-*)
     [ -z "${FAKE_STALL_EXTRA:-}" ] || { echo "0% [Waiting for headers]"; sleep 30; } ;;
 esac
@@ -159,7 +173,7 @@ kernel_tree() {
     fake_runner
     export FAKE_RELEASE=7.0.0-1017-azure; kernel_tree "$FAKE_RELEASE" module
     run bash "$REPO/scripts/install-tools.sh"
-    install="$(grep '^sudo apt-get .* install ' "$FAKE_LOG" | tr '\n' ' ')"
+    install="$(grep '^sudo stdbuf -oL -eL apt-get .* install ' "$FAKE_LOG" | tr '\n' ' ')"
     for pkg in nasm acpica-tools uuid-dev dmg2img hfsprogs busybox-static; do
         [[ " $install " == *" $pkg "* ]] || { echo "not installed: $pkg"; false; }
     done
@@ -190,7 +204,7 @@ kernel_tree() {
     export FAKE_RELEASE=6.17.0-1022-azure FAKE_APT_HAS=linux-modules-extra-6.17.0-1022-azure
     kernel_tree "$FAKE_RELEASE" none
     run bash "$REPO/scripts/install-tools.sh"
-    grep -q '^sudo apt-get .* install .*linux-modules-extra-6.17.0-1022-azure$' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    grep -q '^sudo stdbuf -oL -eL apt-get .* install .*linux-modules-extra-6.17.0-1022-azure$' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
     ! grep -E ' download |dpkg-deb' "$FAKE_LOG" || false
     [[ "$output" == *"the running kernel, 6.17.0-1022-azure, has no hfsplus; installing linux-modules-extra-6.17.0-1022-azure, which has it, before this run knows whether it builds the base image"* ]] || false
 }
@@ -252,7 +266,8 @@ kernel_tree() {
 import sys, yaml
 steps = yaml.safe_load(open(sys.argv[1]))["runs"]["steps"]
 names = [s.get("name") for s in steps]
-uses = [s.get("uses", "") for s in steps]
+# the guest images' caches, in MVM_BLOB_DIR (the apt packages' has its own test below)
+uses = [s.get("uses", "") if "MVM_BLOB_DIR" in s.get("with", {}).get("path", "") else "" for s in steps]
 rs = [i for i, u in enumerate(uses) if u.startswith("actions/cache/restore@")]
 ws = [i for i, u in enumerate(uses) if u.startswith("actions/cache/save@")]
 check = names.index("Check the inputs"); main = names.index("Run in Mavericks")
@@ -314,10 +329,128 @@ PY
     export FAKE_RELEASE=6.17.0-1022-azure FAKE_APT_HAS=linux-modules-extra-6.17.0-1022-azure
     kernel_tree "$FAKE_RELEASE" none
     run bash "$REPO/scripts/install-tools.sh"
-    [ "$(grep -c '^sudo apt-get' "$FAKE_LOG")" -eq 3 ] || { cat "$FAKE_LOG"; false; }
+    [ "$(grep -c '^sudo stdbuf -oL -eL apt-get' "$FAKE_LOG")" -eq 3 ] || { cat "$FAKE_LOG"; false; }
     while read -r line; do
         [[ "$line" == *"-o DPkg::Lock::Timeout="* && "$line" == *"-o Acquire::http::Timeout="* ]] \
             || { echo "unbounded: $line"; false; }
-    done < <(grep '^sudo apt-get' "$FAKE_LOG")
+    done < <(grep '^sudo stdbuf -oL -eL apt-get' "$FAKE_LOG")
     grep -q '^curl-args .*--connect-timeout [0-9]* .*--max-time [0-9]*' "$STUB_LOG"
+}
+
+# spec: on 2026-10-26 one runner in six got the archive's .debs at ~70 kB/s while the others got
+#       15-37 MB/s, so the 20 MB install ran past apt's limit three times running (self-test run
+#       40382445949; apt-probe run 40425490693). The .debs a runner image lacks are kept, per
+#       image, in actions/cache: a hit installs them with no mirror, a miss fetches them once.
+@test "install-tools --packages prints the apt packages, one a line, and nothing else" {
+    fake_runner
+    run bash "$REPO/scripts/install-tools.sh" --packages
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = qemu-system-x86 ]
+    [[ " ${lines[*]} " == *" busybox-static "* ]] || { echo "$output"; false; }
+    [ ! -s "$FAKE_LOG" ] || { cat "$FAKE_LOG"; false; }
+    [ ! -e "$MVM_TOOLS_DIR" ] || false
+}
+
+@test "install-tools: a cache miss fetches the .debs into the cache dir, installs them, and asks for a save" {
+    fake_runner
+    export FAKE_RELEASE=7.0.0-1017-azure; kernel_tree "$FAKE_RELEASE" module
+    export MVM_DEBS_DIR="$BATS_TEST_TMPDIR/debs" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"; : > "$GITHUB_OUTPUT"
+    run bash "$REPO/scripts/install-tools.sh"
+    grep -q 'apt-get .* update' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    grep -q "apt-get .* install .*--download-only .*-o Dir::Cache::Archives=$MVM_DEBS_DIR .*qemu-system-x86" "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    grep -qF "install -y -q --no-install-recommends -o Dir::Etc::SourceList=/dev/null -o Dir::Etc::SourceParts=/nonexistent $MVM_DEBS_DIR/qemu-system-x86_1_amd64.deb" "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    grep -qxF 'debs-save=true' "$GITHUB_OUTPUT" || { cat "$GITHUB_OUTPUT"; false; }
+    # what actions/cache saves: the .debs and the package list they were fetched for, no root-only lock
+    [ ! -e "$MVM_DEBS_DIR/lock" ] && [ ! -e "$MVM_DEBS_DIR/partial" ] || { ls -la "$MVM_DEBS_DIR"; false; }
+    diff <(bash "$REPO/scripts/install-tools.sh" --packages) "$MVM_DEBS_DIR/packages"
+    [[ "$output" == *"no apt packages cached for this runner image: fetching them from the archive, for actions/cache to keep"* ]] || false
+}
+
+@test "install-tools: a cache hit installs the cached .debs offline and never touches the archive" {
+    fake_runner
+    export FAKE_RELEASE=7.0.0-1017-azure; kernel_tree "$FAKE_RELEASE" module
+    export MVM_DEBS_DIR="$BATS_TEST_TMPDIR/debs" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"; : > "$GITHUB_OUTPUT"
+    mkdir -p "$MVM_DEBS_DIR"; : > "$MVM_DEBS_DIR/qemu-system-x86_1_amd64.deb"; : > "$MVM_DEBS_DIR/nasm_2_amd64.deb"
+    bash "$REPO/scripts/install-tools.sh" --packages > "$MVM_DEBS_DIR/packages"
+    run bash "$REPO/scripts/install-tools.sh"
+    ! grep -E 'apt-get .* (update|.*--download-only)' "$FAKE_LOG" || false
+    grep -qF -- "-o Dir::Etc::SourceList=/dev/null -o Dir::Etc::SourceParts=/nonexistent $MVM_DEBS_DIR/nasm_2_amd64.deb $MVM_DEBS_DIR/qemu-system-x86_1_amd64.deb" "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    ! grep -q debs-save "$GITHUB_OUTPUT" || false
+    [[ "$output" == *"installing the 2 apt packages cached for this runner image, with no download"* ]] || false
+}
+
+@test "install-tools: cached .debs for another package list are not used" {
+    fake_runner
+    export FAKE_RELEASE=7.0.0-1017-azure; kernel_tree "$FAKE_RELEASE" module
+    export MVM_DEBS_DIR="$BATS_TEST_TMPDIR/debs" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"; : > "$GITHUB_OUTPUT"
+    mkdir -p "$MVM_DEBS_DIR"; : > "$MVM_DEBS_DIR/stale_1_amd64.deb"; echo qemu-system-x86 > "$MVM_DEBS_DIR/packages"
+    run bash "$REPO/scripts/install-tools.sh"
+    ! grep -q stale_1_amd64 "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    grep -q -- '--download-only' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+}
+
+@test "install-tools: cached .debs that will not install offline fall back to the archive, and say so" {
+    fake_runner
+    export FAKE_RELEASE=7.0.0-1017-azure FAKE_CACHED_DEBS_FAIL=1; kernel_tree "$FAKE_RELEASE" module
+    export MVM_DEBS_DIR="$BATS_TEST_TMPDIR/debs" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"; : > "$GITHUB_OUTPUT"
+    mkdir -p "$MVM_DEBS_DIR"; : > "$MVM_DEBS_DIR/qemu-system-x86_1_amd64.deb"
+    bash "$REPO/scripts/install-tools.sh" --packages > "$MVM_DEBS_DIR/packages"
+    MVM_APT_TRIES=1 run bash "$REPO/scripts/install-tools.sh"
+    # the fake fails every offline install, so the fetched set fails too: the run stops, named
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"::error title=mavericks-vm::apt-get install of QEMU and the plugin's build tools failed (exit 100), 1 times"* ]] || { echo "$output"; false; }
+    [[ "$output" == *"::warning title=mavericks-vm::the apt packages cached for this runner image did not install offline (failed (exit 100), 1 times), so they are fetched from the archive again; what apt printed:"* ]] || { echo "$output"; false; }
+    [[ "$output" == *"E: Unable to fetch some archives"* ]] || false
+    grep -q 'apt-get .* update' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+}
+
+@test "install-tools: with no cache dir, apt installs from the archive as before, and asks for no save" {
+    fake_runner
+    export FAKE_RELEASE=7.0.0-1017-azure; kernel_tree "$FAKE_RELEASE" module
+    unset MVM_DEBS_DIR; export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"; : > "$GITHUB_OUTPUT"
+    run bash "$REPO/scripts/install-tools.sh"
+    ! grep -qE -- '--download-only|Dir::Etc::SourceList' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    grep -q 'apt-get .* install -y -q --no-install-recommends qemu-system-x86' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    ! grep -q debs-save "$GITHUB_OUTPUT" || false
+}
+
+# spec: a stalled install printed nothing at all (self-test run 40382445949): -qq hid apt's Get:
+#       lines, and output a killed apt held in its buffer was lost. Each apt-get now runs quiet
+#       but not silent, line-buffered, so a timeout shows which download it was on.
+@test "install-tools: apt runs line-buffered and prints its downloads, so a timeout shows where it was" {
+    fake_runner
+    export FAKE_RELEASE=6.17.0-1022-azure FAKE_APT_HAS=linux-modules-extra-6.17.0-1022-azure
+    kernel_tree "$FAKE_RELEASE" none
+    run bash "$REPO/scripts/install-tools.sh"
+    [ "$(grep -c 'apt-get' "$FAKE_LOG")" -ge 3 ] || { cat "$FAKE_LOG"; false; }
+    while read -r line; do
+        [[ "$line" == "sudo stdbuf -oL -eL apt-get "* ]] || { echo "buffered: $line"; false; }
+        [[ "$line" != *" install "* || "$line" != *" -qq "* ]] || { echo "silent: $line"; false; }
+    done < <(grep 'apt-get' "$FAKE_LOG")
+}
+
+# spec: the .debs are restored before install-tools runs, by a key naming the runner image and the
+#       package list, saved only when install-tools fetched them, and on a runner that names no
+#       image there is no key, so neither cache step runs and install-tools gets no MVM_DEBS_DIR
+@test "action: the apt packages' cache is keyed by the runner image and list, restored first, saved only when fetched" {
+    run python3 - "$REPO/action.yml" <<'PY'
+import sys, yaml
+steps = yaml.safe_load(open(sys.argv[1]))["runs"]["steps"]
+by = {s.get("name"): (i, s) for i, s in enumerate(steps)}
+ki, key = by["The apt packages' cache key"]
+ri, restore = by["Restore the apt packages this runner image lacks"]
+ii, tools = by["Install QEMU, age, oras and packer"]
+si, save = by["Save the apt packages this run fetched"]
+assert ki < ri < ii < si, (ki, ri, ii, si)
+assert "$ImageOS-$ImageVersion-" in key["run"] and "--packages" in key["run"], key["run"]
+assert restore["if"] == "steps.debs.outputs.key != ''", restore["if"]
+assert restore["uses"].startswith("actions/cache/restore@") and save["uses"].startswith("actions/cache/save@")
+assert restore["with"] == save["with"], (restore["with"], save["with"])
+assert restore["with"]["key"] == "${{ steps.debs.outputs.key }}"
+assert save["if"] == "steps.tools.outputs.debs-save == 'true'", save["if"]
+assert tools["id"] == "tools"
+assert tools["env"]["MVM_DEBS_DIR"] == "${{ steps.debs.outputs.key != '' && format('{0}/mavericks-vm-debs', runner.temp) || '' }}"
+assert restore["with"]["path"] == "${{ runner.temp }}/mavericks-vm-debs"
+PY
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
 }

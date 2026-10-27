@@ -126,6 +126,7 @@ case "$*" in
   # a download into a cache dir leaves a .deb there, and the lock and partial/ apt keeps beside them
   *apt-get*"--download-only"*"Dir::Cache::Archives="*)
     a="$*"; d="${a##*Dir::Cache::Archives=}"; d="${d%% *}"
+    case "$d" in "$(dirname "$FAKE_LOG")"/*) ;; *) echo "fake sudo: $d is outside this test's tmp dir" >&2; exit 1 ;; esac
     mkdir -p "$d/partial"; : > "$d/lock"; : > "$d/qemu-system-x86_1_amd64.deb" ;;
   # the lock and partial/ apt leaves are root's: removed, here only inside this test's tmp dir
   "rm -rf "*)

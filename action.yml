@@ -169,9 +169,41 @@ runs:
         key: mavericks-vm-prepared-${{ steps.key.outputs.prepared }}
         restore-keys: mavericks-vm-prepared-${{ steps.key.outputs.prepared }}-
 
-    - name: Install QEMU, age, oras and packer
+    # spec: tests/safety.bats -- the .debs this runner image lacks, kept per image and package list
+    #       (install-tools.sh says why: one runner in six got the archive at ~70 kB/s on
+    #       2026-10-26). Only a GitHub-hosted runner names its image; on any other, no key, no
+    #       cache, and apt fetches every run, as the step says.
+    - name: The apt packages' cache key
+      id: debs
       shell: bash
+      run: |
+        if [ -n "${ImageOS:-}" ] && [ -n "${ImageVersion:-}" ]; then
+          list="$(bash "$GITHUB_ACTION_PATH/scripts/install-tools.sh" --packages | sha256sum | cut -c1-16)"
+          echo "key=mavericks-vm-debs-$ImageOS-$ImageVersion-$list" >> "$GITHUB_OUTPUT"
+        else
+          echo "mavericks-vm: this runner names no image (ImageOS, ImageVersion), so apt fetches its packages every run"
+        fi
+
+    - name: Restore the apt packages this runner image lacks
+      if: steps.debs.outputs.key != ''
+      uses: actions/cache/restore@v6.1.0
+      with:
+        path: ${{ runner.temp }}/mavericks-vm-debs
+        key: ${{ steps.debs.outputs.key }}
+
+    - name: Install QEMU, age, oras and packer
+      id: tools
+      shell: bash
+      env:
+        MVM_DEBS_DIR: ${{ steps.debs.outputs.key != '' && format('{0}/mavericks-vm-debs', runner.temp) || '' }}
       run: bash "$GITHUB_ACTION_PATH/scripts/install-tools.sh"
+
+    - name: Save the apt packages this run fetched
+      if: steps.tools.outputs.debs-save == 'true'
+      uses: actions/cache/save@v6.1.0
+      with:
+        path: ${{ runner.temp }}/mavericks-vm-debs
+        key: ${{ steps.debs.outputs.key }}
 
     # spec: tests/safety.bats -- the only step that receives image-key; the input check above learns
     #       only whether it was given

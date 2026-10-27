@@ -567,11 +567,14 @@ prune_setup() {
 # spec: action.yml -- the repo tier keeps one cache entry per image: the base (one ~6 GB blob), the
 #       layer and the prepared image, each saved only when this run stored it, so a change that
 #       moves only the layer, or only prepare, never saves the base (or the layer) again
+# (an actions/cache step is counted only when it holds a guest image, in MVM_BLOB_DIR: the apt
+# packages' cache has its own test, in tests/safety.bats)
 action_step() {  # $1 = a step's id or the start of its uses, $2 = which of them (1st, 2nd, ...); writes it as JSON to step.json
     python3 - "$REPO/action.yml" "$1" "${2:-1}" > "$BATS_TEST_TMPDIR/step.json" <<'PY'
 import sys, yaml, json
 steps = yaml.safe_load(open(sys.argv[1]))["runs"]["steps"]
-m = [s for s in steps if s.get("id") == sys.argv[2] or s.get("uses", "").startswith(sys.argv[2])]
+image = lambda s: not s.get("uses", "").startswith("actions/cache/") or "MVM_BLOB_DIR" in s.get("with", {}).get("path", "")
+m = [s for s in steps if image(s) and (s.get("id") == sys.argv[2] or s.get("uses", "").startswith(sys.argv[2]))]
 print(json.dumps(m[int(sys.argv[3]) - 1]))
 PY
 }
@@ -649,7 +652,7 @@ RECIPE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         [ "$(field with key)" = "mavericks-vm-$img-\${{ steps.key.outputs.$img }}" ]
         [ "$(field with restore-keys)" = "mavericks-vm-$img-\${{ steps.key.outputs.$img }}-" ]
     done
-    run python3 -c 'import yaml; print(sum(s.get("uses", "").startswith("actions/cache/restore") for s in yaml.safe_load(open("'"$REPO"'/action.yml"))["runs"]["steps"]))'
+    run python3 -c 'import yaml; print(sum(s.get("uses", "").startswith("actions/cache/restore") and "MVM_BLOB_DIR" in s["with"]["path"] for s in yaml.safe_load(open("'"$REPO"'/action.yml"))["runs"]["steps"]))'
     [ "$output" = 3 ]
 }
 
@@ -663,7 +666,7 @@ RECIPE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         [ "$(field with path)" = "\${{ env.MVM_BLOB_DIR }}/\${{ steps.key.outputs.$img }}.tar.zst.age" ]
         [ "$(field with key)" = "mavericks-vm-$img-\${{ steps.key.outputs.$img }}-$RUN" ]
     done
-    run python3 -c 'import yaml; print(sum(s.get("uses", "").startswith("actions/cache/save") for s in yaml.safe_load(open("'"$REPO"'/action.yml"))["runs"]["steps"]))'
+    run python3 -c 'import yaml; print(sum(s.get("uses", "").startswith("actions/cache/save") and "MVM_BLOB_DIR" in s["with"]["path"] for s in yaml.safe_load(open("'"$REPO"'/action.yml"))["runs"]["steps"]))'
     [ "$output" = 3 ]
 }
 

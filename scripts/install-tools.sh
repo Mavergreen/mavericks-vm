@@ -124,11 +124,14 @@ kernel_with_hfsplus() {  # for the running release $rel: hfsplus a module in its
 #       (action.yml): a hit installs them with no mirror at all; a miss fetches them once, into
 #       MVM_DEBS_DIR, for the action to save. -q, not -qq: a timeout then shows the download it was on.
 debs="${MVM_DEBS_DIR:-}"
+# spec: tests/safety.bats -- offline means apt has no sources at all, so it can only use the files
+#       it is given: measured on the runners (apt-probe run of c17f32d), --no-download refuses local
+#       .debs ("Unable to fetch some archives"), and a plain install of them fetches all 20 MB again
 debs_install() {  # the .debs in $debs, offline; on failure, apt_why and apt_out say why
   local f=("$debs"/*.deb)
   [ -e "${f[0]}" ] || return 0
   apt_try "apt-get install of QEMU and the plugin's build tools" \
-    install -y -q --no-install-recommends --no-download "${f[@]}"
+    install -y -q --no-install-recommends -o Dir::Etc::SourceList=/dev/null -o Dir::Etc::SourceParts=/nonexistent "${f[@]}"
 }
 from_archive() {
   apt_step "apt-get update" update -qq

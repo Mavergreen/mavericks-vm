@@ -133,7 +133,7 @@ case "$*" in
     t="$(dirname "$FAKE_LOG")"
     for p in "${@:3}"; do case "$p" in "$t"/*) [[ "$p" != *..* ]] && rm -rf -- "$p" ;; esac; done ;;
   # a cached .deb that will not install offline, as one a moved archive no longer matches would not
-  *apt-get*"--no-download"*)
+  *apt-get*"Dir::Etc::SourceList=/dev/null"*)
     [ -z "${FAKE_CACHED_DEBS_FAIL:-}" ] || { echo "E: Unable to fetch some archives"; exit 100; } ;;
 esac
 case "$*" in
@@ -358,7 +358,7 @@ PY
     run bash "$REPO/scripts/install-tools.sh"
     grep -q 'apt-get .* update' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
     grep -q "apt-get .* install .*--download-only .*-o Dir::Cache::Archives=$MVM_DEBS_DIR .*qemu-system-x86" "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
-    grep -qF "install -y -q --no-install-recommends --no-download $MVM_DEBS_DIR/qemu-system-x86_1_amd64.deb" "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    grep -qF "install -y -q --no-install-recommends -o Dir::Etc::SourceList=/dev/null -o Dir::Etc::SourceParts=/nonexistent $MVM_DEBS_DIR/qemu-system-x86_1_amd64.deb" "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
     grep -qxF 'debs-save=true' "$GITHUB_OUTPUT" || { cat "$GITHUB_OUTPUT"; false; }
     # what actions/cache saves: the .debs and the package list they were fetched for, no root-only lock
     [ ! -e "$MVM_DEBS_DIR/lock" ] && [ ! -e "$MVM_DEBS_DIR/partial" ] || { ls -la "$MVM_DEBS_DIR"; false; }
@@ -374,7 +374,7 @@ PY
     bash "$REPO/scripts/install-tools.sh" --packages > "$MVM_DEBS_DIR/packages"
     run bash "$REPO/scripts/install-tools.sh"
     ! grep -E 'apt-get .* (update|.*--download-only)' "$FAKE_LOG" || false
-    grep -qF -- "--no-download $MVM_DEBS_DIR/nasm_2_amd64.deb $MVM_DEBS_DIR/qemu-system-x86_1_amd64.deb" "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    grep -qF -- "-o Dir::Etc::SourceList=/dev/null -o Dir::Etc::SourceParts=/nonexistent $MVM_DEBS_DIR/nasm_2_amd64.deb $MVM_DEBS_DIR/qemu-system-x86_1_amd64.deb" "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
     ! grep -q debs-save "$GITHUB_OUTPUT" || false
     [[ "$output" == *"installing the 2 apt packages cached for this runner image, with no download"* ]] || false
 }
@@ -409,7 +409,7 @@ PY
     export FAKE_RELEASE=7.0.0-1017-azure; kernel_tree "$FAKE_RELEASE" module
     unset MVM_DEBS_DIR; export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out"; : > "$GITHUB_OUTPUT"
     run bash "$REPO/scripts/install-tools.sh"
-    ! grep -qE -- '--download-only|--no-download' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
+    ! grep -qE -- '--download-only|Dir::Etc::SourceList' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
     grep -q 'apt-get .* install -y -q --no-install-recommends qemu-system-x86' "$FAKE_LOG" || { cat "$FAKE_LOG"; false; }
     ! grep -q debs-save "$GITHUB_OUTPUT" || false
 }

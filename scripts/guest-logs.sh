@@ -64,6 +64,19 @@ done
 pid="$(sed -n 's/.*Started Qemu\. Pid: \([0-9][0-9]*\).*/\1/p' "$work/packer-debug.log" 2>/dev/null | tail -n 1)"
 if [ -n "$pid" ]; then
   if [[ "$(cat "/proc/$pid/comm" 2>/dev/null)" == qemu-system-* ]]; then
+    # platform: /proc/<pid>/stat fields 3 (state), 14-15 (utime, stime) and 22 (start) in clock ticks;
+    #           the command name is in parentheses and may hold spaces, so fields count after it
+    ticks="$(getconf CLK_TCK 2>/dev/null || echo 100)"
+    # shellcheck disable=SC2046  # the fields are words
+    set -- $(sed 's/^.*) //' "/proc/$pid/stat" 2>/dev/null)
+    up="$(cut -d. -f1 /proc/uptime 2>/dev/null)"
+    if [ $# -ge 20 ] && [ -n "$up" ]; then
+      age=$((up - ${20} / ticks))
+      cpu="$(awk -v t="$((${12} + ${13}))" -v k="$ticks" 'BEGIN { printf "%.1f", t / k }')"
+      say "qemu (pid $pid): state $1, $cpu s of CPU in $age s ($(awk -v c="$cpu" -v a="$((age > 0 ? age : 1))" 'BEGIN { printf "%.0f", 100 * c / a }')% of one core), kept running until now"
+    else
+      say "qemu (pid $pid): its /proc stat could not be read"
+    fi
     kill "$pid" 2>/dev/null
     for _ in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
     if kill -0 "$pid" 2>/dev/null; then say "the build's QEMU (pid $pid) did not stop"; else say "stopped the build's QEMU (pid $pid)"; fi

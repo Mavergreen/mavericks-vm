@@ -66,6 +66,24 @@ keep() { bash "$REPO/scripts/guest-logs.sh" "$TPL" "$WORK" "$DEST"; }
     grep -q "stopped the build's QEMU (pid $pid)" "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
 }
 
+# spec: Actions run 41312175505 (build 8): the guest sat at its installer's last line for 45 minutes and
+#       the log could not say whether it was spinning or halted; a QEMU burning its vCPUs and one
+#       idle are different hangs, so the summary gives the QEMU's CPU time against its age, and its state
+@test "the summary says how much CPU the build's QEMU used, and its state, before it is stopped" {
+    q="$BATS_TEST_TMPDIR/bin/qemu-system-x86_64"; mkdir -p "${q%/*}"
+    printf '#!/bin/bash\nend=$((SECONDS + 1)); while [ $SECONDS -le $end ]; do :; done\nwhile :; do sleep 0.2; done\n' > "$q"; chmod +x "$q"
+    "$q" & pid=$!; KILL_AFTER="$pid"
+    sleep 2.5
+    printf 'packer-plugin-qemu plugin: Started Qemu. Pid: %s\n' "$pid" >> "$WORK/packer-debug.log"
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    line="$(grep "^qemu (pid $pid)" "$DEST/summary.txt")" || { cat "$DEST/summary.txt"; false; }
+    [[ "$line" =~ ": state "[SR]", "([0-9.]+)" s of CPU in "([0-9]+)" s (" ]] || { echo "$line"; false; }
+    awk -v c="${BASH_REMATCH[1]}" 'BEGIN { exit !(c >= 0.5) }' || { echo "$line"; false; }
+    n=$(grep -n "^qemu (pid $pid)" "$DEST/summary.txt" | cut -d: -f1); k=$(grep -n "^stopped the build's QEMU" "$DEST/summary.txt" | cut -d: -f1)
+    [ "$n" -lt "$k" ] || { cat "$DEST/summary.txt"; false; }
+}
+
 @test "a logged pid that is not a QEMU is left alone" {
     sleep 300 & pid=$!; KILL_AFTER="$pid"
     printf 'packer-plugin-qemu plugin: Started Qemu. Pid: %s\n' "$pid" >> "$WORK/packer-debug.log"

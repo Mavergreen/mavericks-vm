@@ -74,6 +74,11 @@ if ! (cd "$tpl" && env -u MVM_IMAGE_KEY -u MVM_TOKEN PACKER_LOG=1 PACKER_LOG_PAT
   exit 1
 fi
 
+# repro branch only: a good build keeps its packer logs too, for the timeline of a good one
+if [ -n "${MVM_REPRO_KEEP:-}" ] && [ -n "${MVM_LOG_DIR:-}" ]; then
+  mkdir -p "$MVM_LOG_DIR/$template-ok" && cp "$work/packer-debug.log" "$log" "$MVM_LOG_DIR/$template-ok/" 2>/dev/null || true
+  cp "$tpl"/output-*-install.log "$MVM_LOG_DIR/$template-ok/" 2>/dev/null || true
+fi
 # spec: tests/build.bats -- the layer's box is the one named for the layer
 case "$template" in
   mavericks-aquatransport) box="$(ls "$tpl"/output/*-aquatransport-*.box)" ;;

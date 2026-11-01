@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   offline-probe:
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -47,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     steps:
       - uses: actions/checkout@v7
       - name: Record the runner
@@ -55,6 +56,8 @@ jobs:
           grep -m1 'model name' /proc/cpuinfo; grep -m1 vendor_id /proc/cpuinfo; nproc; free -g; uname -r
       - uses: ./
         id: vm
+        env:
+          MVM_REPRO_KEEP: '1'
         with:
           image-key: ${{ secrets.MAVERICKS_VM_KEY }}
           disable-cache: true
@@ -62,9 +65,10 @@ jobs:
           sync: 'no'
           run: test "$(sw_vers -productVersion)" = 10.9.5
       - name: Keep the guest's logs
-        if: failure() && steps.vm.outputs.logs-dir != ''
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: mavericks-vm-logs-repro-${{ matrix.n }}-${{ github.run_attempt }}
-          path: ${{ steps.vm.outputs.logs-dir }}
+          path: ${{ runner.temp }}/mavericks-vm-logs
+          if-no-files-found: ignore
           retention-days: 30

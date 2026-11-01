@@ -84,6 +84,70 @@ keep() { bash "$REPO/scripts/guest-logs.sh" "$TPL" "$WORK" "$DEST"; }
     [ "$n" -lt "$k" ] || { cat "$DEST/summary.txt"; false; }
 }
 
+# spec: Actions run 41318225783 (build 15) -- the live guest is asked, as the template's own user with
+#       its own first-boot-only key (a copy at mode 0600), on the port packer logged, once and bounded
+@test "the live guest is asked read-only questions over ssh, on packer's port, with a private copy of the template's key" {
+    printf 'KEY\n' > "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"; chmod 0644 "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"
+    printf '2026/11/01 15:00:25 plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"
+    q="$BATS_TEST_TMPDIR/bin/qemu-system-x86_64"; mkdir -p "${q%/*}"
+    printf '#!/bin/bash\nwhile :; do sleep 0.2; done\n' > "$q"; chmod +x "$q"
+    "$q" & pid=$!; KILL_AFTER="$pid"
+    printf 'plugin: Started Qemu. Pid: %s\n' "$pid" >> "$WORK/packer-debug.log"
+    # an ssh in front of the stub's, which says what mode the key it was given has
+    cat > "$BATS_TEST_TMPDIR/bin/ssh" <<'WRAP'
+#!/bin/bash
+k=""; prev=""; for a in "$@"; do [ "$prev" = -i ] && k="$a"; prev="$a"; done
+printf 'key-mode %s\n' "$(stat -c %a "$k")" >> "$STUB_LOG"
+exec "$(dirname "$0")/../../../../../stubs/ssh" "$@"
+WRAP
+    sed -i "s|exec \"\$(dirname \"\$0\")/../../../../../stubs/ssh\"|exec \"$REPO/tests/stubs/ssh\"|" "$BATS_TEST_TMPDIR/bin/ssh"; chmod +x "$BATS_TEST_TMPDIR/bin/ssh"
+    PATH="$BATS_TEST_TMPDIR/bin:$PATH" STUB_SSH_UP=1 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qxF 'key-mode 600' "$STUB_LOG" || { cat "$STUB_LOG"; false; }
+    l="$(grep '^ssh ' "$STUB_LOG")"
+    [[ "$l" == *"-p 2797 vagrant@127.0.0.1 sh -s"* ]] || { echo "$l"; false; }
+    [[ "$l" == *"BatchMode=yes"* && "$l" == *"-i $WORK/live-key"* ]] || { echo "$l"; false; }
+    [ ! -e "$WORK/live-key" ]
+    grep -q '^== scp -vt /tmp' "$DEST/live-guest.txt" || { cat "$DEST/live-guest.txt"; false; }
+    grep -q 'live guest: asked it over ssh on port 2797 (exit 0)' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    n=$(grep -n 'live guest' "$DEST/summary.txt" | cut -d: -f1); k=$(grep -n "^stopped the build's QEMU" "$DEST/summary.txt" | cut -d: -f1)
+    [ "$n" -lt "$k" ]
+}
+
+@test "a guest that answers nothing is said so, with ssh's exit, and nothing else is lost" {
+    printf 'KEY\n' > "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"
+    printf 'plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"
+    q="$BATS_TEST_TMPDIR/bin/qemu-system-x86_64"; mkdir -p "${q%/*}"
+    printf '#!/bin/bash\nwhile :; do sleep 0.2; done\n' > "$q"; chmod +x "$q"
+    "$q" & pid=$!; KILL_AFTER="$pid"
+    printf 'plugin: Started Qemu. Pid: %s\n' "$pid" >> "$WORK/packer-debug.log"
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q 'live guest: asked it over ssh on port 2797 (exit 255)' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    cmp "$WORK/packer-build.log" "$DEST/packer-build.log"
+}
+
+@test "a guest whose ssh hangs is given up on, and the rest is still kept" {
+    printf 'KEY\n' > "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"
+    printf 'plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"
+    q="$BATS_TEST_TMPDIR/bin/qemu-system-x86_64"; mkdir -p "${q%/*}"
+    printf '#!/bin/bash\nwhile :; do sleep 0.2; done\n' > "$q"; chmod +x "$q"
+    "$q" & pid=$!; KILL_AFTER="$pid"
+    printf 'plugin: Started Qemu. Pid: %s\n' "$pid" >> "$WORK/packer-debug.log"
+    s=$SECONDS
+    GUEST_LOGS_LIVE_TIMEOUT=1 STUB_SSH_HANG=20 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ $((SECONDS - s)) -lt 15 ] || { echo "took $((SECONDS - s)) s"; false; }
+    grep -q 'live guest: asked it over ssh on port 2797 (exit 124)' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+}
+
+@test "no port or no key: the live guest is not asked, and the summary says why" {
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run grep -q '^ssh ' "$STUB_LOG"
+    [ "$status" -ne 0 ] || { cat "$STUB_LOG"; false; }
+}
+
 @test "a logged pid that is not a QEMU is left alone" {
     sleep 300 & pid=$!; KILL_AFTER="$pid"
     printf 'packer-plugin-qemu plugin: Started Qemu. Pid: %s\n' "$pid" >> "$WORK/packer-debug.log"

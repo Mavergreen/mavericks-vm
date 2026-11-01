@@ -84,3 +84,16 @@ setup() {
     run "$STUBS/ssh" -F /dev/null mavericks 'printf %s "$STUB_ROOT"'
     [ "$output" = "$BATS_TEST_TMPDIR" ] || { echo "STUB_ROOT in the guest: '$output'"; false; }
 }
+
+# spec: the stub sudo reads for guest-logs.sh's tests; a find that would run or delete is refused
+@test "the stub sudo runs a find only when it runs, deletes and writes nothing" {
+    S="$BATS_TEST_DIRNAME/stubs/sudo" d="$BATS_TEST_TMPDIR/f"
+    mkdir -p "$d"; : > "$d/x"
+    run "$S" find "$d" -name x -delete;               [ "$status" -ne 0 ]; [ -e "$d/x" ]
+    run "$S" find "$d" -name x -exec touch "$d/ran" \;; [ "$status" -ne 0 ]; [ ! -e "$d/ran" ]
+    run "$S" find "$d" -name x -execdir touch ran \;;  [ "$status" -ne 0 ]; [ ! -e "$d/ran" ]
+    run "$S" find "$d" -name x -fprint "$d/out";      [ "$status" -ne 0 ]; [ ! -e "$d/out" ]
+    run "$S" find "$d" -name x -fls "$d/out";         [ "$status" -ne 0 ]; [ ! -e "$d/out" ]
+    run "$S" find "$d" -name x
+    [ "$status" -eq 0 ]; [ "$output" = "$d/x" ]
+}

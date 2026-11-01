@@ -1,7 +1,8 @@
 #!/bin/bash
 # A stand-in packer: records argv in $STUB_LOG; `build` writes a fake Vagrant box where the
 # Mavericks template would (its disk a copy of $STUB_PACKER_DISK, when that is set), or fails when
-# STUB_PACKER_FAIL is set.
+# STUB_PACKER_FAIL is set, leaving what a failed build with -on-error=abort leaves: its debug log,
+# the serial console beside the output directory, and the disk in it.
 printf 'packer %s\n' "$*" >> "$STUB_LOG"
 . "$(dirname "$0")/_confine.sh"
 printf 'packer-token %s %s\n' "$1" "${PACKER_GITHUB_API_TOKEN:+set}" >> "$STUB_LOG"
@@ -11,7 +12,14 @@ case "$1" in
     if [ -n "${STUB_PACKER_INSTALL_FAIL:-}" ]; then echo "Error: 403 API rate limit exceeded"; exit 1; fi
     exit 0 ;;
   build)
+    printf 'packer-debug PACKER_LOG=%s PACKER_LOG_PATH=%s\n' "${PACKER_LOG:-}" "${PACKER_LOG_PATH:-}" >> "$STUB_LOG"
+    printf 'packer-secrets build %s\n' "$( { [ -z "${MVM_IMAGE_KEY+x}" ] || printf 'image-key '; [ -z "${MVM_TOKEN+x}" ] || printf 'token'; } | grep . || echo none)" >> "$STUB_LOG"
     if [ -n "${STUB_PACKER_FAIL:-}" ]; then
+      out="output-$(basename "$PWD")"
+      confine "$PWD/$out" "$PWD/$out-install.log" ${PACKER_LOG_PATH:+"$PACKER_LOG_PATH"}
+      [ -z "${PACKER_LOG_PATH:-}" ] || printf '2026/10/31 23:10:46 packer-plugin-qemu plugin: Started Qemu. Pid: 1\n' > "$PACKER_LOG_PATH"
+      mkdir -p "$out" && printf 'QFI\373disk' > "$out/$(basename "$PWD").qcow2"
+      echo 'serial from the stub' > "$out-install.log"
       for i in $(seq 1 60); do echo "packer line $i"; done
       echo "Build 'qemu.mavericks' errored: the host check refused"; exit 1
     fi

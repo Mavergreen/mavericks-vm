@@ -3,7 +3,8 @@
 #   usage: build.sh <template> <dir> [<base-dir>]
 #          <template> is mavericks, or mavericks-aquatransport (which needs <base-dir>: an unpacked
 #          Mavericks box, read and never written)
-#          env in:  MVM_DATA_DIR, MVM_CACHE_DIR
+#          env in:  MVM_DATA_DIR, MVM_CACHE_DIR; MVM_LOG_DIR (optional: where a failed build keeps
+#                   its logs, under <template>, by guest-logs.sh)
 #          out:     the guest's box contents (box_0.img, OVMF_CODE.fd, OVMF_VARS.fd, opencore.img,
 #                   ...) in <dir>; on failure, the end of packer's output and exit 1, in plain
 #                   lines: the caller (main.sh, layer.sh) names the image in the one ::error
@@ -56,9 +57,20 @@ quiet packer plugins install github.com/mavergreen/macosx "$pin"
 (cd "$tpl" && quiet packer init .)
 
 log="$work/packer-build.log"
-if ! (cd "$tpl" && packer build -var-file="$root/box.pkrvars.hcl" "${extra[@]}" .) > "$log" 2>&1; then
+# spec: tests/guest_logs.bats -- a failed build keeps what says why (Actions run 41250564922 kept
+#       nothing): packer's debug log, with its times and scp's own words, and, with
+#       -on-error=abort, the disk packer would otherwise delete, so guest-logs.sh can read the
+#       guest's logs from it; packer never gets the image key or the token, since what it writes
+#       is kept for people to read
+if ! (cd "$tpl" && env -u MVM_IMAGE_KEY -u MVM_TOKEN PACKER_LOG=1 PACKER_LOG_PATH="$work/packer-debug.log" \
+      packer build -on-error=abort -var-file="$root/box.pkrvars.hcl" "${extra[@]}" .) > "$log" 2>&1; then
   echo "build.sh: building the guest ($template) with packer-plugin-macosx $pin failed; the end of packer's output:"
   tail -n 40 "$log"
+  if [ -n "${MVM_LOG_DIR:-}" ]; then
+    bash "$root/scripts/guest-logs.sh" "$tpl" "$work" "$MVM_LOG_DIR/$template"
+    echo "build.sh: packer's logs, the serial console and the guest's own logs are kept in $MVM_LOG_DIR/$template"
+    sed 's/^/build.sh:   /' "$MVM_LOG_DIR/$template/summary.txt" 2>/dev/null
+  fi
   exit 1
 fi
 

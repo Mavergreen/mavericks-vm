@@ -90,6 +90,26 @@ Plus four more:
 
 After the step, `ssh mavericks` reaches the guest from later steps.
 
+## When it fails
+
+A failed step keeps what says why, and names the directory in its `logs-dir` output:
+a failed guest build's packer output and timestamped debug log, the guest's serial console,
+and the guest's own logs (`system.log`, `install.log`, the first boot's log, crash reports),
+read offline from the disk packer left; a guest that would not boot, its serial console.
+Never an image: nothing of Apple's OS but those logs. A file holding `image-key` or `token`
+is dropped. To keep them, upload the directory:
+
+```yaml
+      - uses: Mavergreen/mavericks-vm@v1
+        id: vm
+        with: ...
+      - if: failure() && steps.vm.outputs.logs-dir != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: mavericks-vm-logs
+          path: ${{ steps.vm.outputs.logs-dir }}
+```
+
 ## What's in the guest
 
 Mac OS X 10.9.5, plus [Mavericks Forever](https://mavericksforever.com)'s Aqua Transport:

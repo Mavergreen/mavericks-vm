@@ -681,3 +681,60 @@ RECIPE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     [ "$status" -eq 0 ]
     grep -qE '^build\.sh mavericks [^ ]+/box$' "$CALLS" || { cat "$CALLS"; false; }
 }
+
+# spec: tests/guest_logs.bats -- what a failed step kept for a person to read is named in the
+#       step's logs-dir output, for a workflow to upload; the default is under RUNNER_TEMP, never
+#       data-dir, whose images the step removes
+@test "a failed build's kept logs are named in logs-dir; a good run names none" {
+    export RUNNER_TEMP="$BATS_TEST_TMPDIR/rt"
+    drop base layer
+    cat > "$S/build.sh" <<'B'
+#!/bin/bash
+printf 'build.sh %s\n' "$*" >> "$CALLS"
+mkdir -p "$MVM_LOG_DIR/mavericks" && echo 'packer said no' > "$MVM_LOG_DIR/mavericks/packer-build.log"
+exit 1
+B
+    run main
+    [ "$status" -ne 0 ]
+    grep -qxF "logs-dir=$RUNNER_TEMP/mavericks-vm-logs" "$GITHUB_OUTPUT" || { cat "$GITHUB_OUTPUT"; false; }
+    [ -f "$RUNNER_TEMP/mavericks-vm-logs/mavericks/packer-build.log" ]
+    : > "$GITHUB_OUTPUT"; rm -rf "$RUNNER_TEMP"; seed base; seed layer
+    run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run grep '^logs-dir=' "$GITHUB_OUTPUT"
+    [ "$status" -ne 0 ] || { echo "$output"; false; }
+}
+
+# spec: a job artifact is readable by anyone who can read the repo; GitHub masks a secret in the
+#       job's log, never in an artifact, so a kept file holding the image key or the token goes
+@test "a kept log holding the image key or the token is dropped before it is named" {
+    export RUNNER_TEMP="$BATS_TEST_TMPDIR/rt" MVM_TOKEN=ghp_maintesttoken
+    drop base layer
+    cat > "$S/build.sh" <<'B'
+#!/bin/bash
+d="$MVM_LOG_DIR/mavericks"; mkdir -p "$d"
+echo fine > "$d/fine.log"
+echo "x $MVM_IMAGE_KEY y" > "$d/key.log"
+echo "x $MVM_TOKEN y" > "$d/token.log"
+exit 1
+B
+    run main
+    [ "$status" -ne 0 ]
+    [ -f "$RUNNER_TEMP/mavericks-vm-logs/mavericks/fine.log" ]
+    [ ! -e "$RUNNER_TEMP/mavericks-vm-logs/mavericks/key.log" ]
+    [ ! -e "$RUNNER_TEMP/mavericks-vm-logs/mavericks/token.log" ]
+    [[ "$output" == *"dropped mavericks/key.log"* ]] || { echo "$output"; false; }
+    run grep -rF -e "$MVM_IMAGE_KEY" -e "$MVM_TOKEN" "$RUNNER_TEMP"
+    [ "$status" -ne 0 ] || { echo "$output"; false; }
+}
+
+# spec: a guest that does not boot from a good image leaves its serial console in data-dir; it is
+#       kept with the rest
+@test "a guest that fails to boot keeps its serial console" {
+    export RUNNER_TEMP="$BATS_TEST_TMPDIR/rt"
+    mkdir -p "$MVM_DATA_DIR"; echo 'the guest panicked' > "$MVM_DATA_DIR/serial.log"
+    STUB_FAIL='boot.sh */layer' run main
+    [ "$status" -ne 0 ]
+    grep -q 'the guest panicked' "$RUNNER_TEMP/mavericks-vm-logs/boot-serial.log"
+    grep -qxF "logs-dir=$RUNNER_TEMP/mavericks-vm-logs" "$GITHUB_OUTPUT"
+}

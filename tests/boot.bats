@@ -7,6 +7,7 @@ setup() {
     REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
     export PATH="$REPO/tests/stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
     export STUB_QEMU_ARGV="$BATS_TEST_TMPDIR/qemu.argv" HOME="$BATS_TEST_TMPDIR/home"
+    export RUNNER_TEMP="$BATS_TEST_TMPDIR/runner-temp"; mkdir -p "$RUNNER_TEMP"
     mkdir -p "$HOME"; : > "$STUB_LOG"
     export MVM_DATA_DIR="$BATS_TEST_TMPDIR/data" MVM_MEM=4096 MVM_CPU=2 \
         MVM_CPU_MODEL='Penryn,+ssse3,+sse4.1,+sse4.2' MVM_NAT='tcp:8080:80 udp:8081:80' \
@@ -17,6 +18,16 @@ setup() {
 
 boot() { bash "$REPO/scripts/boot.sh" "$@"; }
 argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
+uuid_of() { awk 'p { print; exit } $0 == "-uuid" { p = 1 }' "$STUB_QEMU_ARGV"; }
+# spec: packer-plugin-macosx docs/decisions/0024 -- the address rule, written out again here so a
+#       change to boot.sh's cannot pass by matching itself: 52:54:00, then three bytes of the UUID's
+#       SHA-256, six hex digits further on past each leading 1234
+mac_of() {
+    local h i=0
+    h=$(printf '%s' "$1" | sha256sum | cut -c1-64)
+    while [ "${h:$i:4}" = 1234 ]; do i=$((i + 6)); done
+    printf '52:54:00:%s:%s:%s\n' "${h:$i:2}" "${h:$((i + 2)):2}" "${h:$((i + 4)):2}"
+}
 
 @test "QEMU gets the box's machine, CPU, memory, cores and devices" {
     STUB_SSH_UP=1 run boot "$BOX"
@@ -38,7 +49,7 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     run grep -qxE -- '-usb|-usbdevice' "$STUB_QEMU_ARGV"
     [ "$status" -eq 1 ]
     argv_has 'ide-hd,bus=ide.0,drive=target'
-    argv_has 'e1000-82545em,netdev=net0'
+    argv_has "e1000-82545em,netdev=net0,mac=$(mac_of "$(uuid_of)")"
 }
 
 @test "the box's devices are the one shape, exactly: no second input device, no stray virtio or disk" {
@@ -53,7 +64,7 @@ id=target,if=none,format=qcow2,detect-zeroes=unmap,discard=unmap,file=$MVM_DATA_
 ide-hd,bus=ide.0,drive=target
 id=opencore,if=none,format=raw,snapshot=on,file=$BOX/opencore.img
 virtio-blk-pci,drive=opencore,bootindex=0,bus=pcie.0,addr=0x10
-e1000-82545em,netdev=net0
+e1000-82545em,netdev=net0,mac=$(mac_of "$(uuid_of)")
 ich9-usb-ehci1,id=ehci,bus=pcie.0,addr=0x1d.0
 usb-kbd,bus=ehci.0
 usb-tablet,bus=ehci.0
@@ -228,4 +239,62 @@ TABLE
     run boot
     [ "$status" -eq 2 ]
     [[ "$output" == *"booting"* ]] || false
+}
+
+# spec: packer-plugin-macosx docs/decisions/0024 -- a guest whose firmware gives no UUID waits 30 s
+#       at every cold boot for one (cfprefsd's gethostuuid), and distinct guests must never share
+#       one: every launcher gives QEMU a -uuid of its own, and the NIC an address derived from it
+@test "QEMU gets a -uuid of its own, and the NIC the address ADR 0024 derives from it" {
+    STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    u="$(uuid_of)"
+    [[ "$u" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "-uuid '$u'"; false; }
+    [ "$u" != 00000000-0000-0000-0000-000000000000 ]
+    argv_has "e1000-82545em,netdev=net0,mac=$(mac_of "$u")"
+    [[ "$output" == *"boot.sh: host UUID $u (new, kept in $RUNNER_TEMP/mavericks-vm-host-uuid); NIC $(mac_of "$u"), derived from it"* ]] \
+        || { echo "$output"; false; }
+}
+
+# spec: the derived address, for two UUIDs, as packer-plugin-macosx's lib/common.sh derived_mac
+#       gives it (2026-11-01): one plain, and one whose SHA-256 starts 1234, so never 52:54:00:12:34
+@test "the address is the plugin's for the same UUID, and never in QEMU's own 52:54:00:12:34 range" {
+    while read -r u want; do
+        rm -rf "${RUNNER_TEMP:?}"/*; printf '%s\n' "$u" > "$RUNNER_TEMP/mavericks-vm-host-uuid"
+        STUB_SSH_UP=1 run boot "$BOX"
+        [ "$status" -eq 0 ] || { echo "$output"; false; }
+        argv_has "e1000-82545em,netdev=net0,mac=$want" || { grep e1000 "$STUB_QEMU_ARGV"; echo "want $want"; false; }
+    done <<'PAIRS'
+0f8fad5b-d9cb-469f-a165-70867728950e 52:54:00:c8:12:e1
+0003bb23-0000-4000-8000-00000003bb23 52:54:00:f4:2d:70
+PAIRS
+}
+
+# spec: on a hosted runner the machine is the job: data-dir and the cached images outlive it on a
+#       self-hosted runner, RUNNER_TEMP never does. So the UUID is made at the job's first boot,
+#       kept in RUNNER_TEMP, and the same at every later boot of the job (prepare's guest, then
+#       the prepared one); another job, at once or later, gets its own.
+@test "a second boot in the same job is the same machine; another job is another machine" {
+    STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    first="$(uuid_of)"
+    STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(uuid_of)" = "$first" ]
+    [[ "$output" == *"host UUID $first (kept in $RUNNER_TEMP/mavericks-vm-host-uuid)"* ]] || { echo "$output"; false; }
+    export RUNNER_TEMP="$BATS_TEST_TMPDIR/another-job"; mkdir -p "$RUNNER_TEMP"
+    STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(uuid_of)" != "$first" ]
+    run find "$MVM_DATA_DIR" -name '*uuid*'
+    [ -z "$output" ] || { echo "kept in data-dir: $output"; false; }
+}
+
+@test "a kept UUID that is not one is replaced, and so said" {
+    printf 'not-a-uuid\n' > "$RUNNER_TEMP/mavericks-vm-host-uuid"
+    STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    u="$(uuid_of)"
+    [[ "$u" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || { echo "-uuid '$u'"; false; }
+    [ "$(cat "$RUNNER_TEMP/mavericks-vm-host-uuid")" = "$u" ]
+    [[ "$output" == *"(new, kept in "*"; the one there was not a UUID)"* ]] || { echo "$output"; false; }
 }

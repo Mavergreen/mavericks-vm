@@ -47,6 +47,28 @@ for n in ${MVM_NAT:-}; do
   fwd="$fwd,hostfwd=$proto::$hp-:$gp"
 done
 
+# spec: packer-plugin-macosx docs/decisions/0024 -- distinct guests never share a host UUID or a
+#       NIC address, and a guest given none waits 30 s at every cold boot for one. The machine is
+#       the job: its UUID is made at the job's first boot, kept in RUNNER_TEMP (emptied for every
+#       job, where data-dir and the cached images can outlive one), and the same at its later
+#       boots; the address is derived from it by the plugin's rule (tests/boot.bats)
+is_uuid() { [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; }
+uuid_file="${RUNNER_TEMP:-$data}/mavericks-vm-host-uuid"
+uuid="$(cat "$uuid_file" 2>/dev/null || true)"
+if is_uuid "$uuid"; then
+  said="kept in $uuid_file"
+else
+  [ -z "$uuid" ] && was="" || was="; the one there was not a UUID"
+  uuid="$(tr 'A-F' 'a-f' < /proc/sys/kernel/random/uuid)"
+  is_uuid "$uuid" || { err "cannot make a host UUID: /proc/sys/kernel/random/uuid gave '$uuid'"; exit 1; }
+  printf '%s\n' "$uuid" > "$uuid_file"
+  said="new, kept in $uuid_file$was"
+fi
+h="$(printf '%s' "$uuid" | sha256sum | cut -c1-64)"
+i=0; while [ "${h:$i:4}" = 1234 ]; do i=$((i + 6)); done
+mac="52:54:00:${h:$i:2}:${h:$((i + 2)):2}:${h:$((i + 4)):2}"
+echo "boot.sh: host UUID $uuid ($said); NIC $mac, derived from it"
+
 # spec: packer-plugin-macosx templates/mavericks/box.Vagrantfile.pkrtpl -- the box's own machine:
 #       q35; the disk on AHCI port 0, and OpenCore's disk on virtio-blk in slot 0x10, booted first
 #       (bootindex=0), which no guest has a driver for;
@@ -56,7 +78,7 @@ done
 # spec: tests/boot.bats -- QEMU daemonizes and outlives this step, and a later step can read its
 #       environment from /proc: it starts without the image key or the registry token
 env -u MVM_IMAGE_KEY -u MVM_TOKEN qemu-system-x86_64 \
-  -name mavericks-vm -machine q35,vmport=off,accel=kvm \
+  -name mavericks-vm -uuid "$uuid" -machine q35,vmport=off,accel=kvm \
   -cpu "${MVM_CPU_MODEL:?}" -m "${MVM_MEM:?}M" -smp "${MVM_CPU:?}" -parallel none \
   -drive "if=pflash,format=raw,unit=0,readonly=on,file=$box/OVMF_CODE.fd" \
   -drive "if=pflash,format=raw,unit=1,snapshot=on,file=$box/OVMF_VARS.fd" \
@@ -64,7 +86,7 @@ env -u MVM_IMAGE_KEY -u MVM_TOKEN qemu-system-x86_64 \
   -device ide-hd,bus=ide.0,drive=target \
   -drive "id=opencore,if=none,format=raw,snapshot=on,file=$box/opencore.img" \
   -device virtio-blk-pci,drive=opencore,bootindex=0,bus=pcie.0,addr=0x10 \
-  -netdev "user,id=net0,$fwd" -device e1000-82545em,netdev=net0 \
+  -netdev "user,id=net0,$fwd" -device "e1000-82545em,netdev=net0,mac=$mac" \
   -device ich9-usb-ehci1,id=ehci,bus=pcie.0,addr=0x1d.0 -device usb-kbd,bus=ehci.0 -device usb-tablet,bus=ehci.0 \
   -device VGA,vgamem_mb=64 \
   -display none -serial "file:$data/serial.log" -daemonize -pidfile "$data/qemu.pid"

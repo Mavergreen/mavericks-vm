@@ -48,8 +48,11 @@ for n in ${MVM_NAT:-}; do
 done
 
 # spec: packer-plugin-macosx templates/mavericks/box.Vagrantfile.pkrtpl -- the box's own machine:
-#       q35 with EHCI and UHCI companions (10.9 cannot drive XHCI), OpenCore on usb-storage, the
-#       disk on IDE, e1000, VGA; the disk here is an overlay, so the cached image never changes
+#       q35; the disk on AHCI port 0, and OpenCore's disk on virtio-blk in slot 0x10, booted first
+#       (bootindex=0), which no guest has a driver for;
+#       EHCI alone at 0x1d.0, no companions, with usb-kbd and usb-tablet (packer-plugin-macosx
+#       docs/decisions/0035); e1000, VGA; the disk here is an overlay, so the cached image never
+#       changes
 # spec: tests/boot.bats -- QEMU daemonizes and outlives this step, and a later step can read its
 #       environment from /proc: it starts without the image key or the registry token
 env -u MVM_IMAGE_KEY -u MVM_TOKEN qemu-system-x86_64 \
@@ -57,16 +60,13 @@ env -u MVM_IMAGE_KEY -u MVM_TOKEN qemu-system-x86_64 \
   -cpu "${MVM_CPU_MODEL:?}" -m "${MVM_MEM:?}M" -smp "${MVM_CPU:?}" -parallel none \
   -drive "if=pflash,format=raw,unit=0,readonly=on,file=$box/OVMF_CODE.fd" \
   -drive "if=pflash,format=raw,unit=1,snapshot=on,file=$box/OVMF_VARS.fd" \
-  -device ich9-usb-ehci1,id=usb,bus=pcie.0,addr=0x1d.7,multifunction=on \
-  -device ich9-usb-uhci1,masterbus=usb.0,firstport=0,bus=pcie.0,addr=0x1d.0,multifunction=on \
-  -device ich9-usb-uhci2,masterbus=usb.0,firstport=2,bus=pcie.0,addr=0x1d.1 \
-  -device ich9-usb-uhci3,masterbus=usb.0,firstport=4,bus=pcie.0,addr=0x1d.2 \
-  -drive "id=opencore,if=none,format=raw,snapshot=on,file=$box/opencore.img" \
-  -device usb-storage,bus=usb.0,drive=opencore \
   -drive "id=target,if=none,format=qcow2,detect-zeroes=unmap,discard=unmap,file=$overlay" \
   -device ide-hd,bus=ide.0,drive=target \
+  -drive "id=opencore,if=none,format=raw,snapshot=on,file=$box/opencore.img" \
+  -device virtio-blk-pci,drive=opencore,bootindex=0,bus=pcie.0,addr=0x10 \
   -netdev "user,id=net0,$fwd" -device e1000-82545em,netdev=net0 \
-  -device usb-kbd,bus=usb.0 -device usb-mouse,bus=usb.0 -device VGA,vgamem_mb=64 \
+  -device ich9-usb-ehci1,id=ehci,bus=pcie.0,addr=0x1d.0 -device usb-kbd,bus=ehci.0 -device usb-tablet,bus=ehci.0 \
+  -device VGA,vgamem_mb=64 \
   -display none -serial "file:$data/serial.log" -daemonize -pidfile "$data/qemu.pid"
 
 install -m 0600 "$root/scripts/vagrant-insecure.key" "$data/ssh-key"

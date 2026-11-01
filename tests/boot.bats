@@ -27,10 +27,41 @@ argv_has() { grep -qxF -- "$1" "$STUB_QEMU_ARGV"; }
     argv_has 2
     argv_has "if=pflash,format=raw,unit=0,readonly=on,file=$BOX/OVMF_CODE.fd"
     argv_has "id=opencore,if=none,format=raw,snapshot=on,file=$BOX/opencore.img"
-    argv_has 'usb-storage,bus=usb.0,drive=opencore'
-    argv_has 'ich9-usb-ehci1,id=usb,bus=pcie.0,addr=0x1d.7,multifunction=on'
+    argv_has 'virtio-blk-pci,drive=opencore,bootindex=0,bus=pcie.0,addr=0x10'
+    argv_has 'ich9-usb-ehci1,id=ehci,bus=pcie.0,addr=0x1d.0'
+    argv_has 'usb-kbd,bus=ehci.0'
+    argv_has 'usb-tablet,bus=ehci.0'
+    # spec: packer-plugin-macosx docs/decisions/0035 -- USB carries input alone: no companion,
+    #       no XHCI, no usb-storage, no mouse, no q35 USB
+    run grep -qE 'uhci|xhci|ohci|usb-storage|usb-mouse|masterbus|usb=on|ide.2' "$STUB_QEMU_ARGV"
+    [ "$status" -eq 1 ]
+    run grep -qxE -- '-usb|-usbdevice' "$STUB_QEMU_ARGV"
+    [ "$status" -eq 1 ]
     argv_has 'ide-hd,bus=ide.0,drive=target'
     argv_has 'e1000-82545em,netdev=net0'
+}
+
+@test "the box's devices are the one shape, exactly: no second input device, no stray virtio or disk" {
+    STUB_SSH_UP=1 run boot "$BOX"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    # spec: packer-plugin-macosx docs/decisions/0035 -- every -device and -drive value, in order,
+    #       and no flag that makes a device of its own
+    got=$(awk 'p { print; p = 0 } $0 == "-device" || $0 == "-drive" { p = 1 }' "$STUB_QEMU_ARGV")
+    want="if=pflash,format=raw,unit=0,readonly=on,file=$BOX/OVMF_CODE.fd
+if=pflash,format=raw,unit=1,snapshot=on,file=$BOX/OVMF_VARS.fd
+id=target,if=none,format=qcow2,detect-zeroes=unmap,discard=unmap,file=$MVM_DATA_DIR/overlay.qcow2
+ide-hd,bus=ide.0,drive=target
+id=opencore,if=none,format=raw,snapshot=on,file=$BOX/opencore.img
+virtio-blk-pci,drive=opencore,bootindex=0,bus=pcie.0,addr=0x10
+e1000-82545em,netdev=net0
+ich9-usb-ehci1,id=ehci,bus=pcie.0,addr=0x1d.0
+usb-kbd,bus=ehci.0
+usb-tablet,bus=ehci.0
+VGA,vgamem_mb=64"
+    [ "$got" = "$want" ] || { diff <(echo "$want") <(echo "$got"); false; }
+    run grep -qxE -- '-usb|-usbdevice|-hd[a-d]|-cdrom|-fd[ab]|-sd|-mtdblock|-M|-machine=.*' "$STUB_QEMU_ARGV"
+    [ "$status" -eq 1 ]
+    [ "$(grep -cxF -- -machine "$STUB_QEMU_ARGV")" -eq 1 ]
 }
 
 @test "the cached disk is a read-only backing file; writes go to an overlay under data-dir" {

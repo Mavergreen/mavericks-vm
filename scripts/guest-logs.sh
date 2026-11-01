@@ -118,6 +118,25 @@ live_ssh_variants() {  # $1 = the port; writes $dest/live-ssh.txt
 #       a QMP socket beside its output directory; the QEMU is asked over it, twice 30 s apart, while it
 #       still runs. The reader is the plugin branch's own bin/gate-build-evidence.sh (hunt/bin), which
 #       only asks.
+# spec: tests/guest_logs.bats -- the host's view of the live QEMU, twice 5 s apart: each thread's name, state and
+#       kernel wait channel, and the process's I/O counters; a request stuck in the host shows as a thread in D
+qemu_host_state() {  # $1 = the QEMU's pid; writes $dest/qemu-host.txt
+  local pid="$1" out="$dest/qemu-host.txt" n t
+  : > "$out"
+  for n in 1 2; do
+    {
+      printf 'sample %s, host uptime %s s\n' "$n" "$(cut -d' ' -f1 /proc/uptime)"
+      printf 'threads (name, state, wchan):\n'
+      for t in /proc/"$pid"/task/*; do
+        printf '%s %s %s\n' "$(cat "$t/comm" 2>/dev/null)" "$(sed -n 's/^State:\t//p' "$t/status" 2>/dev/null)" "$(cat "$t/wchan" 2>/dev/null)"
+      done
+      printf 'io:\n'; cat "/proc/$pid/io" 2>&1
+    } >> "$out" 2>&1
+    [ "$n" = 2 ] || sleep "${GUEST_LOGS_HOST_GAP:-5}"
+  done
+  say "qemu host state: two samples of its threads and I/O in qemu-host.txt"
+}
+
 qmp_read() {
   local sock reader="${GUEST_LOGS_QMP_READER:-$(dirname "$0")/../hunt/bin/gate-build-evidence.sh}" f
   sock=""
@@ -136,6 +155,7 @@ qmp_read() {
 pid="$(sed -n 's/.*Started Qemu\. Pid: \([0-9][0-9]*\).*/\1/p' "$work/packer-debug.log" 2>/dev/null | tail -n 1)"
 if [ -n "$pid" ]; then
   if [[ "$(cat "/proc/$pid/comm" 2>/dev/null)" == qemu-system-* ]]; then
+    qemu_host_state "$pid"
     qmp_read
     live_guest "$pid"
     # platform: /proc/<pid>/stat fields 3 (state), 14-15 (utime, stime) and 22 (start) in clock ticks;

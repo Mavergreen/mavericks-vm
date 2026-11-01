@@ -8,6 +8,7 @@ setup() {
     REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
     export PATH="$REPO/tests/stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
     : > "$STUB_LOG"
+    export GUEST_LOGS_HOST_GAP=0
     TPL="$BATS_TEST_TMPDIR/work/templates/mavericks" WORK="$BATS_TEST_TMPDIR/work" DEST="$BATS_TEST_TMPDIR/logs"
     mkdir -p "$TPL/output-mavericks"
     printf 'packer line\nBuild errored: Error uploading script: Process exited with status 1\n' > "$WORK/packer-build.log"
@@ -133,6 +134,29 @@ mkdir -p "$3" && echo "== query-status ==" > "$3/read-1.txt"
 RD
     chmod +x "$BATS_TEST_TMPDIR/reader"
     export GUEST_LOGS_QMP_READER="$BATS_TEST_TMPDIR/reader"
+}
+
+# spec: Actions run 41353051295 (build 30): the QEMU's vCPUs sat in HLT and its block counters did not move
+#       for an hour; whether a host-side request was stuck needs the host's view of its threads and I/O
+@test "hunt: the host's view of the live QEMU (its threads' states and wait channels, its I/O) is kept before it is stopped" {
+    qemu_up
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q '^threads (name, state, wchan):' "$DEST/qemu-host.txt" || { cat "$DEST/qemu-host.txt"; false; }
+    grep -q '^qemu-system-x86' "$DEST/qemu-host.txt" || { cat "$DEST/qemu-host.txt"; false; }
+    grep -q '^io:' "$DEST/qemu-host.txt"
+    grep -q 'rchar' "$DEST/qemu-host.txt"
+    grep -q '^qemu host state: ' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    n=$(grep -n '^qemu host state' "$DEST/summary.txt" | cut -d: -f1); k=$(grep -n "^stopped the build's QEMU" "$DEST/summary.txt" | cut -d: -f1)
+    [ "$n" -lt "$k" ]
+}
+
+@test "hunt: the host's two samples are apart, so what moves in the QEMU's I/O between them shows" {
+    qemu_up
+    GUEST_LOGS_HOST_GAP=2 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    a=$(sed -n 's/^sample 1, host uptime \([0-9.]*\) s$/\1/p' "$DEST/qemu-host.txt"); b=$(sed -n 's/^sample 2, host uptime \([0-9.]*\) s$/\1/p' "$DEST/qemu-host.txt")
+    awk -v a="$a" -v b="$b" 'BEGIN { exit !(a != "" && b - a >= 2) }' || { cat "$DEST/qemu-host.txt"; false; }
 }
 
 @test "hunt: a live QEMU with a QMP socket is read twice, 30 s apart, into qmp/, before it is stopped" {

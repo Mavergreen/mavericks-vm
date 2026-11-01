@@ -202,6 +202,47 @@ def show(m):
     v = m["return"]
     return v.replace("\r\n", "\n") if isinstance(v, str) else json.dumps(v, indent=1, sort_keys=True) + "\n"
 
+# An AHCI command the guest issued and the controller has not completed is a bit in a port's CI
+# (PxCI), and one that completed but whose interrupt was not taken is IS with the line asserted:
+# these registers tell a lost completion from a lost interrupt, which no counter does. Read-only: a
+# memory read of the controller's BAR 5.
+def ahci(pci):
+    found = []
+    for bus in pci.get("return", []) if isinstance(pci.get("return"), list) else []:
+        for d in bus.get("devices", []):
+            if d.get("class_info", {}).get("class") != 0x106:
+                continue
+            for r in d.get("regions", []):
+                if r.get("bar") == 5 and r.get("type") == "memory":
+                    found.append((bus.get("bus", 0), d["slot"], d["function"], r["address"]))
+    if not found:
+        return "no SATA controller with a BAR 5 in query-pci\n"
+    out = ""
+    for b, slot, fn, addr in found:
+        m = call("human-monitor-command", {"command-line": "xp /256xw 0x%x" % addr})
+        if "error" in m:
+            out += show(m)
+            continue
+        words = []
+        for line in m["return"].splitlines():
+            if ":" in line:
+                words += [int(w, 16) for w in line.split(":", 1)[1].split() if w.startswith("0x")]
+        if len(words) < 256:
+            out += "short read: %d words\n%s" % (len(words), m["return"])
+            continue
+        out += "ahci 0000:%02x:%02x.%d BAR5 0x%x: CAP=0x%08x GHC=0x%08x IS=0x%08x PI=0x%08x VS=0x%08x\n" % (
+            b, slot, fn, addr, words[0], words[1], words[2], words[3], words[4])
+        for p in range(6):
+            w = words[(0x100 + 0x80 * p) // 4:(0x100 + 0x80 * (p + 1)) // 4]
+            ci, sact = w[14], w[13]
+            line = "ahci port %d: CI=0x%08x SACT=0x%08x IS=0x%08x IE=0x%08x CMD=0x%08x TFD=0x%08x SSTS=0x%08x" % (
+                p, ci, sact, w[4], w[5], w[6], w[8], w[10])
+            if ci or sact:
+                slots = [str(i) for i in range(32) if (ci | sact) >> i & 1]
+                line += "  OUTSTANDING: commands issued and not completed (slots %s)" % ",".join(slots)
+            out += line + "\n"
+    return out
+
 def ppm_to_png(src, dst):
     b = open(src, "rb").read()
     fields, pos = [], 0
@@ -238,11 +279,15 @@ def read(n):
             parts.append(text)
     put("read %d at %s\n" % (n, started), keep=False)
     cpus = []
+    pci = {}
     for cmd, args in QMP:
         m = call(cmd, args)
         if cmd == "query-cpus-fast" and isinstance(m.get("return"), list):
             cpus = [c["cpu-index"] for c in m["return"] if isinstance(c, dict) and "cpu-index" in c][:16]
+        if cmd == "query-pci":
+            pci = m
         put("== %s ==\n%s" % (cmd, show(m)))
+    put("== ahci registers ==\n" + ahci(pci))
     for h in HMP + ["info lapic %d" % i for i in cpus]:
         put("== %s ==\n%s" % (h, show(call("human-monitor-command", {"command-line": h}))))
     shot = os.path.join(out, "screen-%d" % n)

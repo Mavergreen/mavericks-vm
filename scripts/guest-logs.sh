@@ -59,11 +59,41 @@ for f in "$tpl"/output-*-install.log; do
 done
 [ "$serial" = 1 ] || say "no serial console (output-*-install.log) in $tpl"
 
+# spec: tests/guest_logs.bats -- Actions run 41318225783 (build 15): scp -vt /tmp exited 1 with nothing on
+#       stderr, 151 times in 5 minutes, against a guest whose sshd had accepted the key; the logs
+#       on its disk could not say why. While the QEMU is still up, one bounded ssh as the template's
+#       own user and (public, first-boot-only) key runs read-only questions of the live guest:
+#       who it is, /tmp, what runs, its system.log, and the very scp packer ran, fed nothing.
+live_guest() {  # $1 = the QEMU's pid; writes $dest/live-guest.txt, and says in the summary what happened
+  local port key rc
+  port="$(sed -n 's/.*Attempting SSH connection to 127\.0\.0\.1:\([0-9][0-9]*\)\.\.\..*/\1/p' "$work/packer-debug.log" 2>/dev/null | tail -n 1)"
+  key="$(find "$tpl" -maxdepth 1 -name "*first-boot-only.key.rsa" 2>/dev/null | head -n 1)"
+  if [ -z "$port" ] || [ -z "$key" ]; then say "live guest: no ssh port ('${port:-}') or key ('${key:-}') to ask it with"; return 0; fi
+  install -m 0600 "$key" "$work/live-key" 2>/dev/null || { say "live guest: cannot copy the key"; return 0; }
+  timeout "${GUEST_LOGS_LIVE_TIMEOUT:-150}" ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o LogLevel=ERROR -i "$work/live-key" -p "$port" vagrant@127.0.0.1 'sh -s' > "$dest/live-guest.txt" 2>&1 <<'LIVE'
+exec 2>&1
+echo "== who, when: $(id) / $(date) / $(uname -a)"
+echo "== uptime"; uptime
+echo "== /tmp, home, disk"; ls -ldO /tmp /private/tmp /Users/vagrant; [ -w /tmp ] && echo "/tmp: writable" || echo "/tmp: NOT writable"; df -h /
+echo "== shell, scp"; echo "shell: $SHELL"; command -v scp; ls -l "$(command -v scp)"
+echo "== scp -vt /tmp, fed nothing (what packer runs)"; scp -vt /tmp < /dev/null; echo "scp rc=$?"
+echo "== processes"; ps -axo pid,ppid,stat,etime,command | head -n 80
+echo "== launchd jobs"; launchctl list | head -n 80
+echo "== system.log (last 80)"; tail -n 80 /var/log/system.log
+exit 0
+LIVE
+  rc=$?
+  rm -f "$work/live-key"
+  say "live guest: asked it over ssh on port $port (exit $rc), answer in live-guest.txt ($(wc -l < "$dest/live-guest.txt") lines)"
+}
+
 # spec: tests/guest_logs.bats -- packer -on-error=abort leaves its QEMU running on the disk; only
 #       the pid packer logged, and only when that pid is a QEMU, is stopped
 pid="$(sed -n 's/.*Started Qemu\. Pid: \([0-9][0-9]*\).*/\1/p' "$work/packer-debug.log" 2>/dev/null | tail -n 1)"
 if [ -n "$pid" ]; then
   if [[ "$(cat "/proc/$pid/comm" 2>/dev/null)" == qemu-system-* ]]; then
+    live_guest "$pid"
     # platform: /proc/<pid>/stat fields 3 (state), 14-15 (utime, stime) and 22 (start) in clock ticks;
     #           the command name is in parentheses and may hold spaces, so fields count after it
     ticks="$(getconf CLK_TCK 2>/dev/null || echo 100)"

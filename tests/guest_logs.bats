@@ -154,7 +154,7 @@ RD
     printf 'plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"
     run keep
     [ "$status" -eq 0 ] || { echo "$output"; false; }
-    q=$(grep -n '^reader ' "$STUB_LOG" | cut -d: -f1); l=$(grep -n '^ssh ' "$STUB_LOG" | cut -d: -f1)
+    q=$(grep -n '^reader ' "$STUB_LOG" | cut -d: -f1); l=$(grep -n '^ssh ' "$STUB_LOG" | head -n 1 | cut -d: -f1)
     [ "$q" -lt "$l" ] || { cat "$STUB_LOG"; false; }
 }
 
@@ -209,6 +209,38 @@ RD
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     run grep -q '^reader ' "$STUB_LOG"
     [ "$status" -ne 0 ]
+}
+
+# spec: Actions run 41353051295 (builds 7 and 38): the live guest's `sh -s` exited 1 with no output, as packer's
+#       scp had 151 times: the session starts and its command dies. Which part of an sshd session fails is
+#       told apart by a few more bounded sessions, each with ssh's own -vvv: an exec of `true`, of
+#       /usr/bin/true by path, of `sh -c`, and a pty session (the login shell), into live-ssh.txt
+@test "hunt: the live guest is also asked with plain commands, by path, and with a pty, each with ssh's own -vvv" {
+    printf 'KEY\n' > "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"
+    printf 'plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"
+    qemu_up
+    STUB_SSH_UP=1 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    for v in "true" "/usr/bin/true" "sh -c" "-tt"; do
+        grep -q "^ssh .*-vvv.* -p 2797 .*$v" "$STUB_LOG" || { echo "no ssh -vvv for: $v"; cat "$STUB_LOG"; false; }
+    done
+    grep -q '^== exec: true (rc=0)' "$DEST/live-ssh.txt" || { cat "$DEST/live-ssh.txt"; false; }
+    grep -q '^== exec: /usr/bin/true (rc=0)' "$DEST/live-ssh.txt"
+    grep -q '^== exec: sh -c (rc=0)' "$DEST/live-ssh.txt"
+    grep -q '^== pty: login shell (rc=0)' "$DEST/live-ssh.txt"
+    grep -q 'live ssh variants' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    [ ! -e "$WORK/live-key" ]
+}
+
+@test "hunt: a variant that hangs is given up on, the others still run" {
+    printf 'KEY\n' > "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"
+    printf 'plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"
+    qemu_up
+    s=$SECONDS
+    GUEST_LOGS_LIVE_TIMEOUT=2 STUB_SSH_HANG=20 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ $((SECONDS - s)) -lt 40 ] || { echo "took $((SECONDS - s)) s"; false; }
+    [ "$(grep -c '^== ' "$DEST/live-ssh.txt")" -eq 4 ] || { cat "$DEST/live-ssh.txt"; false; }
 }
 
 @test "a guest that answers nothing is said so, with ssh's exit, and nothing else is lost" {

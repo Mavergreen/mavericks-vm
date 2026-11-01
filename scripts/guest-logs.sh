@@ -84,8 +84,34 @@ echo "== system.log (last 80)"; tail -n 80 /var/log/system.log
 exit 0
 LIVE
   rc=$?
-  rm -f "$work/live-key"
   say "live guest: asked it over ssh on port $port (exit $rc), answer in live-guest.txt ($(wc -l < "$dest/live-guest.txt") lines)"
+  live_ssh_variants "$port"
+  rm -f "$work/live-key"
+}
+
+# spec: Actions run 41353051295 (builds 7 and 38) -- see tests/guest_logs.bats: which part of an sshd session
+#       fails, told apart by a few more bounded sessions with ssh's own -vvv (the last 60 lines of each)
+live_ssh_variants() {  # $1 = the port; writes $dest/live-ssh.txt
+  local port="$1" out="$dest/live-ssh.txt" t="${GUEST_LOGS_LIVE_TIMEOUT:-150}" rc
+  local opts=(-vvv -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$work/live-key" -p "$port")
+  : > "$out"
+  variant() {  # $1 = label, then the ssh arguments after the host
+    local label="$1" log; shift
+    log="$(mktemp "${TMPDIR:-/tmp}/live-ssh.XXXXXX")"
+    if [ "$label" = "pty: login shell" ]; then
+      printf 'echo pty-ok; id; exit\n' | timeout "$t" ssh "${opts[@]}" -tt vagrant@127.0.0.1 "$@" > "$log" 2>&1
+    else
+      timeout "$t" ssh "${opts[@]}" vagrant@127.0.0.1 "$@" > "$log" 2>&1 < /dev/null
+    fi
+    rc=$?
+    { printf '== %s (rc=%s)\n' "$label" "$rc"; tail -n 60 "$log"; } >> "$out"
+    rm -f "$log"
+  }
+  variant "exec: true" true
+  variant "exec: /usr/bin/true" /usr/bin/true
+  variant "exec: sh -c" sh -c 'echo sh-ok'
+  variant "pty: login shell"
+  say "live ssh variants: 4 sessions with ssh -vvv, in live-ssh.txt ($(grep -c '^== ' "$out") sections)"
 }
 
 # spec: tests/guest_logs.bats -- the QMP hunt (packer-plugin-macosx, branch ssh-window): the hunt template opens

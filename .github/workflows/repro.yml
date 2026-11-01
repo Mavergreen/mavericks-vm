@@ -1,0 +1,70 @@
+name: repro
+
+# spec: diagnosis of Actions run 41250564922 (a from-scratch base build that failed at "Error
+#       uploading script: Process exited with status 1"), on a throwaway branch: N cold builds,
+#       each keeping its logs when it fails, and a probe of the offline read on this runner image.
+#       Never cached, never pushed (disable-cache), never merged.
+on:
+  push:
+    branches: [repro-base-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-utils hfsprogs gdisk
+      - name: guest-logs.sh reads an HFS+ volume in a qcow2, on this runner
+        run: |
+          set -eux
+          uname -r
+          w="$RUNNER_TEMP/probe"; tpl="$w/templates/mavericks"; mkdir -p "$tpl/output-mavericks" /tmp/p
+          qemu-img create -f qcow2 "$tpl/output-mavericks/mavericks.qcow2" 1G
+          sudo modprobe nbd max_part=16
+          sudo qemu-nbd -f qcow2 -c /dev/nbd1 "$tpl/output-mavericks/mavericks.qcow2"
+          sudo sgdisk -n1:2048:+200M -t1:EF00 -n2:0:0 -t2:AF00 /dev/nbd1
+          sudo partprobe /dev/nbd1; sleep 2; ls -l /dev/nbd1*
+          sudo mkfs.hfsplus -v Mac /dev/nbd1p2
+          sudo mount -t hfsplus /dev/nbd1p2 /tmp/p
+          sudo mkdir -p /tmp/p/private/var/log /tmp/p/System/Library/Kernels
+          echo hello | sudo tee /tmp/p/private/var/log/system.log; sudo chmod 640 /tmp/p/private/var/log/system.log
+          echo kernel | sudo tee /tmp/p/System/Library/Kernels/kernel
+          sudo umount /tmp/p; sudo qemu-nbd -d /dev/nbd1
+          echo 'packer said' > "$w/packer-build.log"; echo dbg > "$w/packer-debug.log"; echo serial > "$tpl/output-mavericks-install.log"
+          bash scripts/guest-logs.sh "$tpl" "$w" "$RUNNER_TEMP/logs"
+          cat "$RUNNER_TEMP/logs/summary.txt"; find "$RUNNER_TEMP/logs" -type f
+          test "$(cat "$RUNNER_TEMP/logs/guest/private_var_log_system.log")" = hello
+          test ! -e "$RUNNER_TEMP/logs/guest/System_Library_Kernels_kernel"
+          for d in /sys/block/nbd*; do test ! -e "$d/pid" || { echo "$d still attached"; exit 1; }; done
+          ! mount | grep -q mavericks-vm-guest
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Record the runner
+        run: |
+          grep -m1 'model name' /proc/cpuinfo; grep -m1 vendor_id /proc/cpuinfo; nproc; free -g; uname -r
+      - uses: ./
+        id: vm
+        with:
+          image-key: ${{ secrets.MAVERICKS_VM_KEY }}
+          disable-cache: true
+          debug-on-error: true
+          sync: 'no'
+          run: test "$(sw_vers -productVersion)" = 10.9.5
+      - name: Keep the guest's logs
+        if: failure() && steps.vm.outputs.logs-dir != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: mavericks-vm-logs-repro-${{ matrix.n }}-${{ github.run_attempt }}
+          path: ${{ steps.vm.outputs.logs-dir }}
+          retention-days: 30

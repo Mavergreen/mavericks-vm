@@ -59,6 +59,7 @@ jobs:
         id: vm
         env:
           MVM_REPRO_KEEP: '1'
+          MVM_HUNT_QMP: '1'
         with:
           image-key: ${{ secrets.MAVERICKS_VM_KEY }}
           disable-cache: true

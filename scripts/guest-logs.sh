@@ -88,11 +88,29 @@ LIVE
   say "live guest: asked it over ssh on port $port (exit $rc), answer in live-guest.txt ($(wc -l < "$dest/live-guest.txt") lines)"
 }
 
+# spec: tests/guest_logs.bats -- the QMP hunt (packer-plugin-macosx, branch ssh-window): the hunt template opens
+#       a QMP socket beside its output directory; the QEMU is asked over it, twice 30 s apart, while it
+#       still runs. The reader is the plugin branch's own bin/gate-build-evidence.sh (hunt/bin), which
+#       only asks.
+qmp_read() {
+  local sock reader="${GUEST_LOGS_QMP_READER:-$(dirname "$0")/../hunt/bin/gate-build-evidence.sh}" f
+  sock=""
+  for f in "$tpl"/output-*-qmp.sock; do [ -e "$f" ] && { sock="$f"; break; }; done
+  if [ -z "$sock" ]; then say "qmp: no QMP socket (output-*-qmp.sock) in $tpl"; return 0; fi
+  if timeout -k 10 "${GUEST_LOGS_QMP_TIMEOUT:-240}" bash "$reader" qmp "$sock" "$dest/qmp" 30 > "$dest/qmp-reader.txt" 2>&1; then
+    if grep -q warning "$dest/qmp-reader.txt"; then say "qmp: the reader warned; what it said is in qmp-reader.txt"; return 0; fi
+    say "qmp: read the QEMU over $sock twice, 30 s apart, into qmp/ ($(find "$dest/qmp" -type f 2>/dev/null | wc -l) files)"
+  else
+    say "qmp: the reader failed (exit $?); what it said is in qmp-reader.txt"
+  fi
+}
+
 # spec: tests/guest_logs.bats -- packer -on-error=abort leaves its QEMU running on the disk; only
 #       the pid packer logged, and only when that pid is a QEMU, is stopped
 pid="$(sed -n 's/.*Started Qemu\. Pid: \([0-9][0-9]*\).*/\1/p' "$work/packer-debug.log" 2>/dev/null | tail -n 1)"
 if [ -n "$pid" ]; then
   if [[ "$(cat "/proc/$pid/comm" 2>/dev/null)" == qemu-system-* ]]; then
+    qmp_read
     live_guest "$pid"
     # platform: /proc/<pid>/stat fields 3 (state), 14-15 (utime, stime) and 22 (start) in clock ticks;
     #           the command name is in parentheses and may hold spaces, so fields count after it

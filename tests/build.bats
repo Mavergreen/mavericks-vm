@@ -12,7 +12,7 @@ setup() {
     printf 'source "qemu" "mavericks" {}\n' > "$BATS_TEST_TMPDIR/z/templates/mavericks/mavericks.pkr.hcl"
     printf 'source "qemu" "aquatransport" {}\n' > "$BATS_TEST_TMPDIR/z/templates/mavericks-aquatransport/mavericks-aquatransport.pkr.hcl"
     (cd "$BATS_TEST_TMPDIR/z" && zip -qr ../template.zip templates)
-    export STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/template.zip"
+    export STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/template.zip" STUB_TEMPLATE_SEEN="$BATS_TEST_TMPDIR/template-seen.hcl"
     PIN="$(tr -d '[:space:]' < "$REPO/components/packer-plugin-macosx/version")"
 }
 
@@ -210,4 +210,50 @@ build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
     MVM_IMAGE_KEY=AGE-SECRET-KEY-1BUILDTEST MVM_TOKEN=ghp_buildtoken run build "$BATS_TEST_TMPDIR/out"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     grep -qxF 'packer-secrets build none' "$STUB_LOG" || { cat "$STUB_LOG"; false; }
+}
+
+# spec: the QMP hunt (packer-plugin-macosx, branch ssh-window): the hunt branch builds on the pinned
+#       release's template, plus the one row the plugin's branch adds, a QMP socket beside the output
+#       directory, so a stalled QEMU can be asked what it thinks before it is stopped
+@test "hunt: with MVM_HUNT_QMP the template gets the plugin branch's QMP row after -uuid, and only that" {
+    printf 'source "qemu" "mavericks" {\n  qemuargs = [\n    ["-uuid", local.build_uuid],\n    ["-drive", "x"],\n  ]\n}\n' \
+        > "$BATS_TEST_TMPDIR/z/templates/mavericks/mavericks.pkr.hcl"
+    (cd "$BATS_TEST_TMPDIR/z" && rm -f ../template.zip && zip -qr ../template.zip templates)
+    cp "$BATS_TEST_TMPDIR/z/templates/mavericks/mavericks.pkr.hcl" "$BATS_TEST_TMPDIR/orig.hcl"
+    MVM_HUNT_QMP=1 run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    cat > "$BATS_TEST_TMPDIR/want.hcl" <<'HCL'
+source "qemu" "mavericks" {
+  qemuargs = [
+    ["-uuid", local.build_uuid],
+    ["-qmp", "unix:${local.output_directory}-qmp.sock,server,nowait"],
+    ["-drive", "x"],
+  ]
+}
+HCL
+    # the template packer was given
+    grep -q '^packer build ' "$STUB_LOG"
+    cmp "$BATS_TEST_TMPDIR/want.hcl" "$STUB_TEMPLATE_SEEN" || { diff "$BATS_TEST_TMPDIR/want.hcl" "$STUB_TEMPLATE_SEEN"; false; }
+}
+
+@test "hunt: without MVM_HUNT_QMP the template is exactly the release's" {
+    printf 'source "qemu" "mavericks" {\n  qemuargs = [\n    ["-uuid", local.build_uuid],\n  ]\n}\n' \
+        > "$BATS_TEST_TMPDIR/z/templates/mavericks/mavericks.pkr.hcl"
+    (cd "$BATS_TEST_TMPDIR/z" && rm -f ../template.zip && zip -qr ../template.zip templates)
+    cp "$BATS_TEST_TMPDIR/z/templates/mavericks/mavericks.pkr.hcl" "$BATS_TEST_TMPDIR/orig.hcl"
+    run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    cmp "$BATS_TEST_TMPDIR/orig.hcl" "$STUB_TEMPLATE_SEEN"
+}
+
+@test "hunt: a template without the -uuid row to anchor on fails the step, never a hunt without QMP" {
+    MVM_HUNT_QMP=1 run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"MVM_HUNT_QMP"*"-uuid"* ]] || { echo "$output"; false; }
+}
+
+@test "hunt: the layer's template is left alone" {
+    mkdir -p "$BATS_TEST_TMPDIR/base"
+    MVM_HUNT_QMP=1 run build_layer "$BATS_TEST_TMPDIR/out" "$BATS_TEST_TMPDIR/base"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
 }

@@ -38,6 +38,18 @@ curl -fsSL --retry 3 --connect-timeout 20 --max-time 120 -o "$work/$zip" \
 (cd "$work" && unzip -q -o "$zip")
 tpl="$work/templates/$template"
 
+# hunt branch only: the plugin branch ssh-window's one added template row, a QMP socket beside the output
+# directory (templates/mavericks, the base build; the layer is left alone). Anchored on the -uuid row, and
+# a template without it fails the step, so no hunt ever runs without the socket it exists to read.
+if [ -n "${MVM_HUNT_QMP:-}" ] && [ "$template" = mavericks ]; then
+  anchor='    ["-uuid", local.build_uuid],'
+  row='    ["-qmp", "unix:${local.output_directory}-qmp.sock,server,nowait"],'
+  f="$tpl/mavericks.pkr.hcl"
+  [ "$(grep -cxF -- "$anchor" "$f")" = 1 ] \
+    || { echo "build.sh: MVM_HUNT_QMP: $f has no single -uuid row to put the QMP row after"; exit 1; }
+  awk -v a="$anchor" -v r="$row" '{ print } $0 == a { print r }' "$f" > "$f.qmp" && mv "$f.qmp" "$f"
+fi
+
 export PACKER_PLUGIN_PATH="$data/packer-plugins" PACKER_CACHE_DIR="$MVM_CACHE_DIR" CHECKPOINT_DISABLE=1
 # spec: tests/build.bats -- exactly the pinned plugin, installed before init: init alone would
 #       take the newest release its ~> constraint allows, which may be newer than the cache key says

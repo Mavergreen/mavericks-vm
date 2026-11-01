@@ -114,6 +114,103 @@ WRAP
     [ "$n" -lt "$k" ]
 }
 
+# spec: the QMP hunt (packer-plugin-macosx, branch ssh-window) -- the build's QEMU is asked, over the QMP
+#       socket the hunt template opens beside its output directory, what it thinks, twice 30 s apart,
+#       while it still runs: before the live guest is asked and before it is stopped
+qemu_up() {
+    q="$BATS_TEST_TMPDIR/bin/qemu-system-x86_64"; mkdir -p "${q%/*}"
+    printf '#!/bin/bash\nwhile :; do sleep 0.2; done\n' > "$q"; chmod +x "$q"
+    "$q" & pid=$!; KILL_AFTER="$pid"
+    printf 'plugin: Started Qemu. Pid: %s\n' "$pid" >> "$WORK/packer-debug.log"
+}
+qmp_reader() {  # a stand-in reader: records its arguments, leaves a file where it was told
+    cat > "$BATS_TEST_TMPDIR/reader" <<'RD'
+#!/bin/bash
+printf 'reader %s\n' "$*" >> "$STUB_LOG"
+if [ -n "${READER_FAIL:-}" ]; then echo "reader: warning: no" >&2; exit 1; fi
+if [ -n "${READER_WARN:-}" ]; then echo "gate-build-evidence: warning: qmp: could not read the QEMU" >&2; exit 0; fi
+mkdir -p "$3" && echo "== query-status ==" > "$3/read-1.txt"
+RD
+    chmod +x "$BATS_TEST_TMPDIR/reader"
+    export GUEST_LOGS_QMP_READER="$BATS_TEST_TMPDIR/reader"
+}
+
+@test "hunt: a live QEMU with a QMP socket is read twice, 30 s apart, into qmp/, before it is stopped" {
+    qemu_up; qmp_reader
+    : > "$TPL/output-mavericks-qmp.sock"
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qxF "reader qmp $TPL/output-mavericks-qmp.sock $DEST/qmp 30" "$STUB_LOG" || { cat "$STUB_LOG"; false; }
+    [ -f "$DEST/qmp/read-1.txt" ]
+    grep -q '^qmp: read the QEMU' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    n=$(grep -n '^qmp: ' "$DEST/summary.txt" | cut -d: -f1); k=$(grep -n "^stopped the build's QEMU" "$DEST/summary.txt" | cut -d: -f1)
+    [ "$n" -lt "$k" ]
+}
+
+@test "hunt: the QMP read comes before the live guest is asked" {
+    qemu_up; qmp_reader
+    : > "$TPL/output-mavericks-qmp.sock"
+    printf 'KEY\n' > "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"
+    printf 'plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    q=$(grep -n '^reader ' "$STUB_LOG" | cut -d: -f1); l=$(grep -n '^ssh ' "$STUB_LOG" | cut -d: -f1)
+    [ "$q" -lt "$l" ] || { cat "$STUB_LOG"; false; }
+}
+
+@test "hunt: a reader that fails costs the QMP evidence only, and the summary says so" {
+    qemu_up; qmp_reader
+    : > "$TPL/output-mavericks-qmp.sock"
+    READER_FAIL=1 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q '^qmp: the reader failed' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    grep -q "stopped the build's QEMU (pid $pid)" "$DEST/summary.txt"
+    cmp "$WORK/packer-build.log" "$DEST/packer-build.log"
+}
+
+@test "hunt: a reader that exits 0 but warned (the usual way it fails) is not reported as a read" {
+    qemu_up; qmp_reader
+    : > "$TPL/output-mavericks-qmp.sock"
+    READER_WARN=1 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q '^qmp: the reader warned' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    grep -q 'could not read the QEMU' "$DEST/qmp-reader.txt"
+}
+
+@test "hunt: a reader that hangs is given up on, and the rest is still kept" {
+    qemu_up
+    cat > "$BATS_TEST_TMPDIR/reader" <<'RD'
+#!/bin/bash
+sleep 30
+RD
+    chmod +x "$BATS_TEST_TMPDIR/reader"; export GUEST_LOGS_QMP_READER="$BATS_TEST_TMPDIR/reader"
+    : > "$TPL/output-mavericks-qmp.sock"
+    s=$SECONDS
+    GUEST_LOGS_QMP_TIMEOUT=1 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ $((SECONDS - s)) -lt 15 ] || { echo "took $((SECONDS - s)) s"; false; }
+    grep -q '^qmp: the reader failed' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    grep -q "stopped the build's QEMU" "$DEST/summary.txt"
+}
+
+@test "hunt: no QMP socket is said so in the summary, and nothing is read" {
+    qemu_up; qmp_reader
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q '^qmp: no QMP socket' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    run grep -q '^reader ' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
+@test "hunt: with no QEMU left to ask, the QMP socket is not read" {
+    qmp_reader
+    : > "$TPL/output-mavericks-qmp.sock"
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run grep -q '^reader ' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
 @test "a guest that answers nothing is said so, with ssh's exit, and nothing else is lost" {
     printf 'KEY\n' > "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"
     printf 'plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"

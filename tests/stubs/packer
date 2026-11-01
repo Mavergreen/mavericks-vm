@@ -12,6 +12,7 @@ case "$1" in
     if [ -n "${STUB_PACKER_INSTALL_FAIL:-}" ]; then echo "Error: 403 API rate limit exceeded"; exit 1; fi
     exit 0 ;;
   build)
+    [ -z "${STUB_TEMPLATE_SEEN:-}" ] || cp "$PWD/$(basename "$PWD").pkr.hcl" "$STUB_TEMPLATE_SEEN" 2>/dev/null || true
     printf 'packer-debug PACKER_LOG=%s PACKER_LOG_PATH=%s\n' "${PACKER_LOG:-}" "${PACKER_LOG_PATH:-}" >> "$STUB_LOG"
     printf 'packer-secrets build %s\n' "$( { [ -z "${MVM_IMAGE_KEY+x}" ] || printf 'image-key '; [ -z "${MVM_TOKEN+x}" ] || printf 'token'; } | grep . || echo none)" >> "$STUB_LOG"
     if [ -n "${STUB_PACKER_FAIL:-}" ]; then

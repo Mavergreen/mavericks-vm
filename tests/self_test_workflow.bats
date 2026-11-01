@@ -254,3 +254,47 @@ JSON
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     [ "$(echo "$output" | paste -sd' ')" = "3 4 5 6" ] || { echo "deleted: $output"; false; }
 }
+
+# spec: tests/guest_logs.bats -- a failed guest build keeps its logs (Actions run 41250564922 kept
+#       none); the Action names them in logs-dir, and every self-test job that uses it uploads that
+#       dir, and only that dir, as an artifact when the job fails, under a name no other job's takes
+@test "every self-test job uploads the Action's kept logs when it fails, and nothing else" {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    run python3 - "$REPO/.github/workflows/self-test.yml" "$REPO/action.yml" <<'PY'
+import sys, yaml
+jobs = yaml.safe_load(open(sys.argv[1]))["jobs"]
+action = yaml.safe_load(open(sys.argv[2]))
+bad = []
+out = action.get("outputs", {}).get("logs-dir", {})
+if out.get("value") != "${{ steps.main.outputs.logs-dir }}":
+    bad.append("action.yml: no logs-dir output from the main step")
+names = []
+for name, job in jobs.items():
+    steps = job.get("steps", [])
+    for i, s in enumerate(steps):
+        if s.get("uses") != "./":
+            continue
+        sid = s.get("id")
+        ups = [t for t in steps[i + 1:] if str(t.get("uses", "")).startswith("actions/upload-artifact@")]
+        if not sid or len(ups) != 1:
+            bad.append(name + ": no single upload after the Action, or the Action has no id")
+            continue
+        u = ups[0]
+        want_if = "failure() && steps.%s.outputs.logs-dir != ''" % sid
+        if str(u.get("if", "")).strip() != want_if:
+            bad.append(name + ": upload if is " + repr(u.get("if")))
+        w = u.get("with", {})
+        if w.get("path") != "${{ steps.%s.outputs.logs-dir }}" % sid:
+            bad.append(name + ": upload path is " + repr(w.get("path")))
+        if "github.run_attempt" not in str(w.get("name", "")):
+            bad.append(name + ": artifact name lacks the attempt")
+        names.append(str(w.get("name", "")))
+if len(set(names)) != len(names):
+    bad.append("two jobs share an artifact name")
+if "matrix" in str(jobs.get("guest", {})) and not any("strategy.job-index" in n for n in names):
+    bad.append("the matrix job's artifact name does not tell its jobs apart")
+print(bad)
+sys.exit(1 if bad else 0)
+PY
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+}

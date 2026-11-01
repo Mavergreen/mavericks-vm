@@ -40,11 +40,20 @@ jobs:
           df -Pk /mnt | awk 'NR == 2 { print $4 }' > "$RUNNER_TEMP/free-before.kib"
           ( while :; do echo "$(date -u +%H:%M:%S) $(df -Pk /mnt | awk 'NR == 2 { print $4 }')" >> "$RUNNER_TEMP/free.kib"; sleep 5; done ) > /dev/null 2>&1 &
       - uses: ./
+        id: vm
         with:
           image-key: ${{ secrets.MAVERICKS_VM_KEY }}
           debug-on-error: true
           sync: 'no'
           run: test "$(sw_vers -productVersion)" = 10.9.5
+      # spec: tests/self_test_workflow.bats -- what a failed run kept, never an image
+      - name: Keep the guest's logs
+        if: failure() && steps.vm.outputs.logs-dir != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: mavericks-vm-logs-warm-${{ github.run_attempt }}
+          path: ${{ steps.vm.outputs.logs-dir }}
+          retention-days: 30
       - name: The data disk's peak use
         if: always()
         run: |
@@ -87,6 +96,7 @@ jobs:
           df -Pk /mnt | awk 'NR == 2 { print $4 }' > "$RUNNER_TEMP/free-before.kib"
           ( while :; do echo "$(date -u +%H:%M:%S) $(df -Pk /mnt | awk 'NR == 2 { print $4 }')" >> "$RUNNER_TEMP/free.kib"; sleep 5; done ) > /dev/null 2>&1 &
       - uses: ./
+        id: vm
         with:
           image-key: ${{ secrets.MAVERICKS_VM_KEY }}
           sync: ${{ matrix.sync }}
@@ -120,6 +130,14 @@ jobs:
             printf '%s\n' "$ROUNDTRIP" > roundtrip.txt
         env:
           ROUNDTRIP: from the guest via ${{ matrix.sync }}
+      # spec: tests/self_test_workflow.bats -- what a failed run kept, never an image
+      - name: Keep the guest's logs
+        if: failure() && steps.vm.outputs.logs-dir != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: mavericks-vm-logs-guest-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: ${{ steps.vm.outputs.logs-dir }}
+          retention-days: 30
       - name: The data disk's peak use
         if: always()
         run: |

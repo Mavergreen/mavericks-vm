@@ -9,5 +9,12 @@ case "$1" in
   # spec: tests/stubs_safety.bats -- what they write is confined to the test's tmp dir
   mkdir) . "$(dirname "$0")/_confine.sh"; for a in "${@:2}"; do [[ "$a" == -* ]] || confine "$a"; done; exec "$@" ;;
   sed) . "$(dirname "$0")/_confine.sh"; confine "${@: -1}"; exec "$@" ;;
+  # spec: tests/stubs_safety.bats -- reads only: tail, and a find that runs, deletes and writes nothing
+  tail) exec "$@" ;;
+  find)
+    for a in "${@:2}"; do
+      case "$a" in -delete|-exec|-execdir|-ok|-okdir|-fprint*|-fls) echo "stub sudo: refusing find $a" >&2; exit 1 ;; esac
+    done
+    exec "$@" ;;
   *) echo "stub sudo: refusing '$1' (not on the allowlist in tests/stubs/sudo)" >&2; exit 1 ;;
 esac

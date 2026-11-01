@@ -159,3 +159,55 @@ build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
     [[ "$output" == *"API rate limit exceeded"* ]] || false
     [[ "$output" != *"::error"* ]] || false
 }
+
+# spec: tests/guest_logs.bats -- Actions run 41250564922 failed a base build at "Error uploading
+#       script: Process exited with status 1" with nothing to say why: packer printed no times,
+#       its debug log (scp's stderr) was not written, and packer deleted the disk and the serial
+#       console went with the job. A failed build now keeps them, under MVM_LOG_DIR/<template>.
+@test "packer builds with a debug log and -on-error=abort, so a failure's timeline and disk survive it" {
+    run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q '^packer build -on-error=abort ' "$STUB_LOG" || { cat "$STUB_LOG"; false; }
+    grep -qxF "packer-debug PACKER_LOG=1 PACKER_LOG_PATH=$MVM_DATA_DIR/build/packer-debug.log" "$STUB_LOG" \
+        || { cat "$STUB_LOG"; false; }
+}
+
+@test "a failed build keeps packer's output and debug log and the serial console, under the log dir" {
+    export MVM_LOG_DIR="$BATS_TEST_TMPDIR/logs"
+    STUB_PACKER_FAIL=1 run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    grep -q 'the host check refused' "$MVM_LOG_DIR/mavericks/packer-build.log"
+    grep -q 'Started Qemu' "$MVM_LOG_DIR/mavericks/packer-debug.log"
+    grep -q 'serial from the stub' "$MVM_LOG_DIR/mavericks/serial-output-mavericks-install.log"
+    [ -f "$MVM_LOG_DIR/mavericks/summary.txt" ]
+    [[ "$output" == *"kept in $MVM_LOG_DIR/mavericks"* ]] || { echo "$output"; false; }
+    run find "$MVM_LOG_DIR" -name '*.qcow2' -o -name '*.img' -o -name '*.box'
+    [ -z "$output" ] || { echo "kept: $output"; false; }
+}
+
+@test "the layer's failed build keeps its logs under its own name" {
+    export MVM_LOG_DIR="$BATS_TEST_TMPDIR/logs"
+    mkdir -p "$BATS_TEST_TMPDIR/base"
+    STUB_PACKER_FAIL=1 run build_layer "$BATS_TEST_TMPDIR/out" "$BATS_TEST_TMPDIR/base"
+    [ "$status" -eq 1 ]
+    grep -q 'the host check refused' "$MVM_LOG_DIR/mavericks-aquatransport/packer-build.log"
+}
+
+@test "a good build keeps no logs, and a failed one with no log dir fails as before" {
+    export MVM_LOG_DIR="$BATS_TEST_TMPDIR/logs"
+    run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ ! -e "$MVM_LOG_DIR" ]
+    unset MVM_LOG_DIR
+    STUB_PACKER_FAIL=1 run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the host check refused"* ]] || false
+}
+
+# spec: what packer writes reaches a job artifact, so the image key and the job's token never
+#       enter its environment
+@test "packer build never sees the image key or the job's token" {
+    MVM_IMAGE_KEY=AGE-SECRET-KEY-1BUILDTEST MVM_TOKEN=ghp_buildtoken run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qxF 'packer-secrets build none' "$STUB_LOG" || { cat "$STUB_LOG"; false; }
+}

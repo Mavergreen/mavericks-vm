@@ -82,6 +82,9 @@ outputs:
   cache-after-prepare-hit:
     description: true when a prepared guest was restored and prepare was skipped
     value: ${{ steps.main.outputs.cache-after-prepare-hit }}
+  logs-dir:
+    description: On a failure, the directory of what the Action kept for a person to read -- a failed guest build's packer logs, serial console and the guest's own logs, read from its disk; the boot's serial console -- and never an image; empty when nothing was kept
+    value: ${{ steps.main.outputs.logs-dir }}
 
 runs:
   using: composite

@@ -5,7 +5,8 @@
 #                   MVM_NO_HFSPLUS (install-tools.sh: the running kernel, when it has no hfsplus);
 #                   MVM_BASE_RECIPE (optional: the plugin's base recipe, as action.yml's key step
 #                   fetched it; when empty, key.sh fetches it here)
-#          out:     run's exit status; in $GITHUB_OUTPUT, cache-after-prepare-hit and, in the repo
+#          out:     run's exit status; in $GITHUB_OUTPUT, cache-after-prepare-hit, logs-dir (on a
+#                   failure that kept logs: build.sh's, guest-logs.sh's, the boot's serial console) and, in the repo
 #                   tier, cache-save-base, cache-save-layer and cache-save-prepared (true for each
 #                   image this run stored); the guest left running for later "ssh mavericks" and
 #                   custom-shell steps
@@ -19,6 +20,9 @@ data="${MVM_DATA_DIR:?main.sh: MVM_DATA_DIR is unset}"
 box="$data/box" layer="$data/layer" prepared="$data/prepared"
 mkdir -p "$data"
 step() { bash "$here/$1" "${@:2}"; }
+# spec: tests/main.bats -- where a failed step keeps what a person needs to read: under RUNNER_TEMP,
+#       never data-dir, whose images this step removes; named in logs-dir for a workflow to upload
+export MVM_LOG_DIR="${MVM_LOG_DIR:-${RUNNER_TEMP:-$data}/mavericks-vm-logs}"
 store="${MVM_STORE:-registry}"
 
 # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Two tiers" (in
@@ -59,6 +63,24 @@ if ! printf '%s\n' "${MVM_IMAGE_KEY:-}" | age-keygen -y > /dev/null 2>&1; then
   exit 1
 fi
 
+# spec: tests/main.bats -- an artifact is readable by anyone who can read the repo, and GitHub
+#       masks a secret only in the job's log, so a kept file holding the image key or the token
+#       is dropped before the dir is named
+# shellcheck disable=SC2317  # keep_logs runs from finish, the EXIT trap's
+keep_logs() {
+  local f s
+  if [ -f "$data/serial.log" ]; then mkdir -p "$MVM_LOG_DIR" && cp "$data/serial.log" "$MVM_LOG_DIR/boot-serial.log"; fi
+  [ -d "$MVM_LOG_DIR" ] && [ -n "$(find "$MVM_LOG_DIR" -type f 2>/dev/null)" ] || return 0
+  for s in "${MVM_IMAGE_KEY:-}" "${MVM_TOKEN:-}"; do
+    [ -n "$s" ] || continue
+    while IFS= read -r f; do
+      rm -f -- "$f" && echo "mavericks-vm: dropped ${f#"$MVM_LOG_DIR"/} from the kept logs: it holds a secret"
+    done < <(grep -rlF -e "$s" "$MVM_LOG_DIR" 2>/dev/null)
+  done
+  echo "logs-dir=$MVM_LOG_DIR" >> "${GITHUB_OUTPUT:-/dev/null}"
+  echo "mavericks-vm: this run's logs are kept in $MVM_LOG_DIR (the step's logs-dir output)"
+}
+
 # shellcheck disable=SC2317  # finish runs from the EXIT trap below
 finish() {
   status=$1
@@ -68,6 +90,7 @@ finish() {
     tail -n 40 "$data/serial.log" 2>/dev/null || true
     echo "::endgroup::"
   fi
+  if [ "$status" -ne 0 ]; then keep_logs; fi
   # spec: docs/superpowers/specs/2026-10-06-mavericks-vm-design.md "Safety" -- the decrypted guest
   #       leaves the disk when the step ends; a running QEMU keeps the files it has open, so later
   #       steps' ssh and custom shell still work (a composite action has no post step to do this)

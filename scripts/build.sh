@@ -35,6 +35,16 @@ zip="packer-plugin-macosx_${pin}_${template}_template.zip"
 curl -fsSL --retry 3 --connect-timeout 20 --max-time 120 -o "$work/$zip" \
   "https://github.com/Mavergreen/packer-plugin-macosx/releases/download/$pin/$zip" \
   || { echo "build.sh: downloading $zip failed"; exit 1; }
+# spec: tests/build.bats -- the zip carries the failed-build reader that runs on this host (packer-plugin-macosx
+#       docs/decisions/0040), so it is held to the SHA256SUMS the same release publishes; fail closed
+sums="packer-plugin-macosx_${pin}_SHA256SUMS"
+curl -fsSL --retry 3 --connect-timeout 20 --max-time 120 -o "$work/$sums" \
+  "https://github.com/Mavergreen/packer-plugin-macosx/releases/download/$pin/$sums" \
+  || { echo "build.sh: downloading $sums failed"; exit 1; }
+want="$(awk -v z="$zip" '$2 == z { print $1; exit }' "$work/$sums")"
+[ -n "$want" ] || { echo "build.sh: $zip is not in the release's SHA256SUMS"; exit 1; }
+got="$( { sha256sum "$work/$zip" 2>/dev/null || shasum -a 256 "$work/$zip"; } | cut -d' ' -f1)"
+[ "$got" = "$want" ] || { echo "build.sh: $zip does not match the release's SHA256SUMS"; exit 1; }
 (cd "$work" && unzip -q -o "$zip")
 tpl="$work/templates/$template"
 

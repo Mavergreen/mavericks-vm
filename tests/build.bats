@@ -33,6 +33,34 @@ build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
         || { cat "$STUB_LOG"; false; }
 }
 
+# spec: owner ruling R70, 2026-11-02 -- the reader comes out of this zip and runs on a host that holds the image key,
+#       so the zip is held to the SHA256SUMS the same release publishes, and fails closed
+@test "the template zip is checked against the same release's SHA256SUMS" {
+    run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qxF "curl https://github.com/Mavergreen/packer-plugin-macosx/releases/download/$PIN/packer-plugin-macosx_${PIN}_SHA256SUMS" "$STUB_LOG"
+}
+
+@test "a template zip that is not the sum the release lists is refused before packer runs" {
+    STUB_SUMS=bad run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"build.sh: packer-plugin-macosx_${PIN}_mavericks_template.zip does not match the release's SHA256SUMS"* ]] || { echo "$output"; false; }
+    run grep -q '^packer' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
+@test "a template zip the release's SHA256SUMS does not list is refused" {
+    STUB_SUMS=unlisted run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"build.sh: packer-plugin-macosx_${PIN}_mavericks_template.zip is not in the release's SHA256SUMS"* ]] || { echo "$output"; false; }
+}
+
+@test "SHA256SUMS that cannot be downloaded fail the build, saying which download" {
+    STUB_SUMS=fail run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"build.sh: downloading packer-plugin-macosx_${PIN}_SHA256SUMS failed"* ]] || { echo "$output"; false; }
+}
+
 @test "a failed template download exits 1 saying which download failed" {
     STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/absent.zip" run build "$BATS_TEST_TMPDIR/out"
     [ "$status" -eq 1 ]

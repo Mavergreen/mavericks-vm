@@ -8,6 +8,7 @@ setup() {
     REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
     export PATH="$REPO/tests/stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
     : > "$STUB_LOG"
+    export GUEST_LOGS_HOST_GAP=0
     TPL="$BATS_TEST_TMPDIR/work/templates/mavericks" WORK="$BATS_TEST_TMPDIR/work" DEST="$BATS_TEST_TMPDIR/logs"
     mkdir -p "$TPL/output-mavericks"
     printf 'packer line\nBuild errored: Error uploading script: Process exited with status 1\n' > "$WORK/packer-build.log"
@@ -112,6 +113,176 @@ WRAP
     grep -q 'live guest: asked it over ssh on port 2797 (exit 0)' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
     n=$(grep -n 'live guest' "$DEST/summary.txt" | cut -d: -f1); k=$(grep -n "^stopped the build's QEMU" "$DEST/summary.txt" | cut -d: -f1)
     [ "$n" -lt "$k" ]
+}
+
+# spec: 2026-11-01 owner rulings R66/R67, packer-plugin-macosx docs/decisions/0040 -- the build's QEMU is asked, over
+#       the QMP socket the plugin's templates open beside their output directory, what it thinks, twice 30 s
+#       apart, while it still runs: before the live guest is asked and before it is stopped
+qemu_up() {
+    q="$BATS_TEST_TMPDIR/bin/qemu-system-x86_64"; mkdir -p "${q%/*}"
+    printf '#!/bin/bash\nwhile :; do sleep 0.2; done\n' > "$q"; chmod +x "$q"
+    "$q" & pid=$!; KILL_AFTER="$pid"
+    printf 'plugin: Started Qemu. Pid: %s\n' "$pid" >> "$WORK/packer-debug.log"
+}
+# the reader the plugin release ships in its template zip (templates/<os>/gate-build-evidence.sh), beside the template
+qmp_reader() {  # a stand-in reader: records its arguments, leaves a file where it was told
+    cat > "$BATS_TEST_TMPDIR/reader" <<'RD'
+#!/bin/bash
+printf 'reader %s\n' "$*" >> "$STUB_LOG"
+printf 'reader-env image-key=%s token=%s\n' "${MVM_IMAGE_KEY-unset}" "${MVM_TOKEN-unset}" >> "$STUB_LOG"
+if [ -n "${READER_FAIL:-}" ]; then echo "reader: no" >&2; exit 1; fi
+if [ -n "${READER_WARN:-}" ]; then echo "gate-build-evidence: warning: qmp: could not read the QEMU" >&2; exit 0; fi
+mkdir -p "$3" && echo "== query-status ==" > "$3/read-1.txt"
+RD
+    chmod +x "$BATS_TEST_TMPDIR/reader"
+    cp "$BATS_TEST_TMPDIR/reader" "$TPL/gate-build-evidence.sh"
+}
+sock() { mkdir -m 0700 "$TPL/output-mavericks-qmp" && : > "$TPL/output-mavericks-qmp/qmp.sock"; }
+
+# spec: Actions run 41353051295 (build 30): the QEMU's vCPUs sat in HLT and its block counters did not move
+#       for an hour; whether a host-side request was stuck needs the host's view of its threads and I/O
+@test "the host's view of the live QEMU (its threads' states and wait channels, its I/O) is kept before it is stopped" {
+    qemu_up
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q '^threads (name, state, wchan):' "$DEST/qemu-host.txt" || { cat "$DEST/qemu-host.txt"; false; }
+    grep -q '^qemu-system-x86' "$DEST/qemu-host.txt" || { cat "$DEST/qemu-host.txt"; false; }
+    grep -q '^io:' "$DEST/qemu-host.txt"
+    grep -q 'rchar' "$DEST/qemu-host.txt"
+    grep -q '^qemu host state: ' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    n=$(grep -n '^qemu host state' "$DEST/summary.txt" | cut -d: -f1); k=$(grep -n "^stopped the build's QEMU" "$DEST/summary.txt" | cut -d: -f1)
+    [ "$n" -lt "$k" ]
+}
+
+@test "the host's two samples are apart, so what moves in the QEMU's I/O between them shows" {
+    qemu_up
+    GUEST_LOGS_HOST_GAP=2 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    a=$(sed -n 's/^sample 1, host uptime \([0-9.]*\) s$/\1/p' "$DEST/qemu-host.txt"); b=$(sed -n 's/^sample 2, host uptime \([0-9.]*\) s$/\1/p' "$DEST/qemu-host.txt")
+    awk -v a="$a" -v b="$b" 'BEGIN { exit !(a != "" && b - a >= 2) }' || { cat "$DEST/qemu-host.txt"; false; }
+}
+
+# spec: one source of truth (owner ruling R70, 2026-11-02) -- the reader is the plugin release's own, in the template zip
+#       build.sh already downloads and verifies against the release's SHA256SUMS, beside the template; nothing is fetched
+@test "a live QEMU with a QMP socket is read twice, 30 s apart, into qmp/, by the template zip's reader, before it is stopped" {
+    qemu_up; qmp_reader; sock
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run grep -q '^curl' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+    grep -qxF "reader qmp $TPL/output-mavericks-qmp/qmp.sock $DEST/qmp 30" "$STUB_LOG" || { cat "$STUB_LOG"; false; }
+    [ -f "$DEST/qmp/read-1.txt" ]
+    grep -q '^qmp: read the QEMU' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    n=$(grep -n '^qmp: ' "$DEST/summary.txt" | cut -d: -f1); k=$(grep -n "^stopped the build's QEMU" "$DEST/summary.txt" | cut -d: -f1)
+    [ "$n" -lt "$k" ]
+}
+
+# spec: code from a plugin release runs on the host that holds the image key; it gets neither secret
+@test "the template's reader runs without the image key or the token" {
+    qemu_up; qmp_reader; sock
+    MVM_IMAGE_KEY=sekrit MVM_TOKEN=tok run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qxF 'reader-env image-key=unset token=unset' "$STUB_LOG" || { cat "$STUB_LOG"; false; }
+}
+
+@test "the QMP read comes before the live guest is asked" {
+    qemu_up; qmp_reader; sock
+    printf 'KEY\n' > "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"
+    printf 'plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    q=$(grep -n '^reader ' "$STUB_LOG" | cut -d: -f1); l=$(grep -n '^ssh ' "$STUB_LOG" | head -n 1 | cut -d: -f1)
+    [ "$q" -lt "$l" ] || { cat "$STUB_LOG"; false; }
+}
+
+# spec: workarounds detect their need -- a pin whose template zip predates the reader (but not the socket) says so
+@test "a socket with no reader in the template costs the QMP evidence only, and the summary names the pinned release" {
+    qemu_up; sock
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    pin="$(tr -d '[:space:]' < "$REPO/components/packer-plugin-macosx/version")"
+    grep -qF "qmp: the template of plugin release $pin carries no gate-build-evidence.sh" "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    grep -q "stopped the build's QEMU (pid $pid)" "$DEST/summary.txt"
+    cmp "$WORK/packer-build.log" "$DEST/packer-build.log"
+}
+
+@test "a reader that fails costs the QMP evidence only, and the summary says so" {
+    qemu_up; qmp_reader; sock
+    READER_FAIL=1 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q '^qmp: the reader failed' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    grep -q "stopped the build's QEMU (pid $pid)" "$DEST/summary.txt"
+    cmp "$WORK/packer-build.log" "$DEST/packer-build.log"
+}
+
+@test "a reader that exits 0 but warned (the usual way it fails) is not reported as a read" {
+    qemu_up; qmp_reader; sock
+    READER_WARN=1 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -q '^qmp: the reader warned' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    grep -q 'could not read the QEMU' "$DEST/qmp-reader.txt"
+}
+
+@test "a reader that hangs is given up on, and the rest is still kept" {
+    qemu_up; sock
+    printf '#!/bin/bash\nsleep 30\n' > "$TPL/gate-build-evidence.sh"
+    s=$SECONDS
+    GUEST_LOGS_QMP_TIMEOUT=1 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ $((SECONDS - s)) -lt 15 ] || { echo "took $((SECONDS - s)) s"; false; }
+    grep -q '^qmp: the reader failed' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    grep -q "stopped the build's QEMU" "$DEST/summary.txt"
+}
+
+# spec: workarounds detect their need -- the plugin release pinned today (v0.20261031.1) opens no socket
+@test "no QMP socket says so, naming the pinned plugin release, and reads nothing" {
+    qemu_up; qmp_reader
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    pin="$(tr -d '[:space:]' < "$REPO/components/packer-plugin-macosx/version")"
+    grep -qF "qmp: no QMP socket (output-*-qmp/qmp.sock) in $TPL: the template of plugin release $pin opens none" "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    run grep -q '^reader ' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
+@test "with no QEMU left to ask, the QMP socket is not read" {
+    qmp_reader; sock
+    run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    run grep -q '^reader ' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
+# spec: Actions run 41353051295 (builds 7 and 38): the live guest's `sh -s` exited 1 with no output, as packer's
+#       scp had 151 times: the session starts and its command dies. Which part of an sshd session fails is
+#       told apart by a few more bounded sessions, each with ssh's own -vvv: an exec of `true`, of
+#       /usr/bin/true by path, of `sh -c`, and a pty session (the login shell), into live-ssh.txt
+@test "the live guest is also asked with plain commands, by path, and with a pty, each with ssh's own -vvv" {
+    printf 'KEY\n' > "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"
+    printf 'plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"
+    qemu_up
+    STUB_SSH_UP=1 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    for v in "true" "/usr/bin/true" "sh -c" "-tt"; do
+        grep -q "^ssh .*-vvv.* -p 2797 .*$v" "$STUB_LOG" || { echo "no ssh -vvv for: $v"; cat "$STUB_LOG"; false; }
+    done
+    grep -q '^== exec: true (rc=0)' "$DEST/live-ssh.txt" || { cat "$DEST/live-ssh.txt"; false; }
+    grep -q '^== exec: /usr/bin/true (rc=0)' "$DEST/live-ssh.txt"
+    grep -q '^== exec: sh -c (rc=0)' "$DEST/live-ssh.txt"
+    grep -q '^== pty: login shell (rc=0)' "$DEST/live-ssh.txt"
+    grep -q 'live ssh variants' "$DEST/summary.txt" || { cat "$DEST/summary.txt"; false; }
+    [ ! -e "$WORK/live-key" ]
+}
+
+@test "a variant that hangs is given up on, the others still run" {
+    printf 'KEY\n' > "$TPL/vagrant-standard-insecure-first-boot-only.key.rsa"
+    printf 'plugin: [INFO] Attempting SSH connection to 127.0.0.1:2797...\n' >> "$WORK/packer-debug.log"
+    qemu_up
+    s=$SECONDS
+    GUEST_LOGS_LIVE_TIMEOUT=2 STUB_SSH_HANG=20 run keep
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ $((SECONDS - s)) -lt 40 ] || { echo "took $((SECONDS - s)) s"; false; }
+    [ "$(grep -c '^== ' "$DEST/live-ssh.txt")" -eq 4 ] || { cat "$DEST/live-ssh.txt"; false; }
 }
 
 @test "a guest that answers nothing is said so, with ssh's exit, and nothing else is lost" {

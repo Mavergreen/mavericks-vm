@@ -84,8 +84,72 @@ echo "== system.log (last 80)"; tail -n 80 /var/log/system.log
 exit 0
 LIVE
   rc=$?
-  rm -f "$work/live-key"
   say "live guest: asked it over ssh on port $port (exit $rc), answer in live-guest.txt ($(wc -l < "$dest/live-guest.txt") lines)"
+  live_ssh_variants "$port"
+  rm -f "$work/live-key"
+}
+
+# spec: Actions run 41353051295 (builds 7 and 38) -- see tests/guest_logs.bats: which part of an sshd session
+#       fails, told apart by a few more bounded sessions with ssh's own -vvv (the last 60 lines of each)
+live_ssh_variants() {  # $1 = the port; writes $dest/live-ssh.txt
+  local port="$1" out="$dest/live-ssh.txt" t="${GUEST_LOGS_LIVE_TIMEOUT:-150}" rc
+  local opts=(-vvv -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$work/live-key" -p "$port")
+  : > "$out"
+  variant() {  # $1 = label, then the ssh arguments after the host
+    local label="$1" log; shift
+    log="$(mktemp "${TMPDIR:-/tmp}/live-ssh.XXXXXX")"
+    if [ "$label" = "pty: login shell" ]; then
+      printf 'echo pty-ok; id; exit\n' | timeout "$t" ssh "${opts[@]}" -tt vagrant@127.0.0.1 "$@" > "$log" 2>&1
+    else
+      timeout "$t" ssh "${opts[@]}" vagrant@127.0.0.1 "$@" > "$log" 2>&1 < /dev/null
+    fi
+    rc=$?
+    { printf '== %s (rc=%s)\n' "$label" "$rc"; tail -n 60 "$log"; } >> "$out"
+    rm -f "$log"
+  }
+  variant "exec: true" true
+  variant "exec: /usr/bin/true" /usr/bin/true
+  variant "exec: sh -c" sh -c 'echo sh-ok'
+  variant "pty: login shell"
+  say "live ssh variants: 4 sessions with ssh -vvv, in live-ssh.txt ($(grep -c '^== ' "$out") sections)"
+}
+
+# spec: tests/guest_logs.bats -- the host's view of the live QEMU, twice 5 s apart: each thread's name, state and
+#       kernel wait channel, and the process's I/O counters; a request stuck in the host shows as a thread in D
+qemu_host_state() {  # $1 = the QEMU's pid; writes $dest/qemu-host.txt
+  local pid="$1" out="$dest/qemu-host.txt" n t
+  : > "$out"
+  for n in 1 2; do
+    {
+      printf 'sample %s, host uptime %s s\n' "$n" "$(cut -d' ' -f1 /proc/uptime)"
+      printf 'threads (name, state, wchan):\n'
+      for t in /proc/"$pid"/task/*; do
+        printf '%s %s %s\n' "$(cat "$t/comm" 2>/dev/null)" "$(sed -n 's/^State:\t//p' "$t/status" 2>/dev/null)" "$(cat "$t/wchan" 2>/dev/null)"
+      done
+      printf 'io:\n'; cat "/proc/$pid/io" 2>&1
+    } >> "$out" 2>&1
+    [ "$n" = 2 ] || sleep "${GUEST_LOGS_HOST_GAP:-5}"
+  done
+  say "qemu host state: two samples of its threads and I/O in qemu-host.txt"
+}
+
+# spec: tests/guest_logs.bats -- the QEMU is asked over the QMP socket the plugin's templates open beside their output
+#       directory (docs/decisions/0040 of packer-plugin-macosx), by the reader that release's template zip carries
+#       beside the template (R70): the zip build.sh downloaded and checked against the release's SHA256SUMS, so
+#       there is one source of truth and the reader comes with the socket. A release that predates either is
+#       said so. The reader gets neither secret.
+qmp_read() {
+  local sock="" f rc reader="$tpl/gate-build-evidence.sh" pin
+  pin="$(tr -d '[:space:]' < "$(dirname "$0")/../components/packer-plugin-macosx/version" 2>/dev/null)"
+  for f in "$tpl"/output-*-qmp/qmp.sock; do [ -e "$f" ] && { sock="$f"; break; }; done
+  if [ -z "$sock" ]; then say "qmp: no QMP socket (output-*-qmp/qmp.sock) in $tpl: the template of plugin release ${pin:-?} opens none"; return 0; fi
+  if [ ! -f "$reader" ]; then say "qmp: the template of plugin release ${pin:-?} carries no gate-build-evidence.sh to read the socket with"; return 0; fi
+  timeout -k 10 "${GUEST_LOGS_QMP_TIMEOUT:-240}" env -u MVM_IMAGE_KEY -u MVM_TOKEN bash "$reader" qmp "$sock" "$dest/qmp" 30 > "$dest/qmp-reader.txt" 2>&1
+  rc=$?
+  if [ "$rc" -ne 0 ]; then say "qmp: the reader failed (exit $rc); what it said is in qmp-reader.txt"
+  elif grep -q warning "$dest/qmp-reader.txt"; then say "qmp: the reader warned; what it said is in qmp-reader.txt"
+  else say "qmp: read the QEMU over $sock twice, 30 s apart, into qmp/ ($(find "$dest/qmp" -type f 2>/dev/null | wc -l) files)"
+  fi
 }
 
 # spec: tests/guest_logs.bats -- packer -on-error=abort leaves its QEMU running on the disk; only
@@ -93,6 +157,8 @@ LIVE
 pid="$(sed -n 's/.*Started Qemu\. Pid: \([0-9][0-9]*\).*/\1/p' "$work/packer-debug.log" 2>/dev/null | tail -n 1)"
 if [ -n "$pid" ]; then
   if [[ "$(cat "/proc/$pid/comm" 2>/dev/null)" == qemu-system-* ]]; then
+    qemu_host_state "$pid"
+    qmp_read
     live_guest "$pid"
     # platform: /proc/<pid>/stat fields 3 (state), 14-15 (utime, stime) and 22 (start) in clock ticks;
     #           the command name is in parentheses and may hold spaces, so fields count after it

@@ -96,6 +96,13 @@ A failed step keeps what says why, and names the directory in its `logs-dir` out
 a failed guest build's packer output and timestamped debug log, the guest's serial console,
 and the guest's own logs (`system.log`, `install.log`, the first boot's log, crash reports),
 read offline from the disk packer left; a guest that would not boot, its serial console.
+While the build's QEMU is still up, a stalled build is also asked what it thinks: over the QMP
+socket that plugin releases after v0.20261031.1 open, read twice 30 seconds apart by the reader
+(`gate-build-evidence.sh`) that release's template zip carries beside the template (the zip is
+checked against the release's `SHA256SUMS` before it is unpacked; `summary.txt` names the pinned
+release when its template has no socket or no reader), the host's view of the QEMU's threads and I/O,
+and a few more bounded `ssh -vvv` sessions to tell which part of a session fails. The AHCI registers,
+the interrupt state and a screenshot are text and PNG.
 Never an image: nothing of Apple's OS but those logs. A file holding `image-key` or `token`
 is dropped. To keep them, upload the directory:
 

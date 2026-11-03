@@ -257,8 +257,10 @@ JSON
 
 # spec: tests/guest_logs.bats -- a failed guest build keeps its logs (Actions run 41250564922 kept
 #       none); the Action names them in logs-dir, and every self-test job that uses it uploads that
-#       dir, and only that dir, as an artifact when the job fails, under a name no other job's takes
-@test "every self-test job uploads the Action's kept logs when it fails, and nothing else" {
+#       dir, and only that dir, as an artifact when the job fails, under a name no other job's takes.
+#       A cancelled job's processes are killed (Actions run 41501371727, at the 6 h limit), so the Action
+#       keeps nothing: packer's two logs and the serial console are taken from the data disk, and only they.
+@test "every self-test job uploads the Action's kept logs when it fails, packer's logs when it is cancelled, and nothing else" {
     REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
     run python3 - "$REPO/.github/workflows/self-test.yml" "$REPO/action.yml" <<'PY'
 import sys, yaml
@@ -276,10 +278,23 @@ for name, job in jobs.items():
             continue
         sid = s.get("id")
         ups = [t for t in steps[i + 1:] if str(t.get("uses", "")).startswith("actions/upload-artifact@")]
-        if not sid or len(ups) != 1:
-            bad.append(name + ": no single upload after the Action, or the Action has no id")
+        fails = [t for t in ups if not str(t.get("if", "")).startswith("cancelled()")]
+        cancels = [t for t in ups if str(t.get("if", "")).startswith("cancelled()")]
+        if not sid or len(fails) != 1 or len(cancels) != 1:
+            bad.append(name + ": not one upload on failure and one on cancellation after the Action, or the Action has no id")
             continue
-        u = ups[0]
+        c = cancels[0]
+        if str(c.get("if", "")).strip() != "cancelled() && env.MVM_DATA_DIR != ''":
+            bad.append(name + ": cancelled upload if is " + repr(c.get("if")))
+        cw = c.get("with", {})
+        want_paths = ["${{ env.MVM_DATA_DIR }}/build/packer-build.log", "${{ env.MVM_DATA_DIR }}/build/packer-debug.log",
+                      "${{ env.MVM_DATA_DIR }}/build/templates/*/output-*-install.log"]
+        if [l.strip() for l in str(cw.get("path", "")).splitlines() if l.strip()] != want_paths:
+            bad.append(name + ": cancelled upload path is " + repr(cw.get("path")))
+        if "github.run_attempt" not in str(cw.get("name", "")):
+            bad.append(name + ": cancelled artifact name lacks the attempt")
+        names.append(str(cw.get("name", "")))
+        u = fails[0]
         want_if = "failure() && steps.%s.outputs.logs-dir != ''" % sid
         if str(u.get("if", "")).strip() != want_if:
             bad.append(name + ": upload if is " + repr(u.get("if")))

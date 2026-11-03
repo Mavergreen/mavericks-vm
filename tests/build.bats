@@ -33,6 +33,34 @@ build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
         || { cat "$STUB_LOG"; false; }
 }
 
+# spec: owner ruling R70, 2026-11-02 -- the reader comes out of this zip and runs on a host that holds the image key,
+#       so the zip is held to the SHA256SUMS the same release publishes, and fails closed
+@test "the template zip is checked against the same release's SHA256SUMS" {
+    run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    grep -qxF "curl https://github.com/Mavergreen/packer-plugin-macosx/releases/download/$PIN/packer-plugin-macosx_${PIN}_SHA256SUMS" "$STUB_LOG"
+}
+
+@test "a template zip that is not the sum the release lists is refused before packer runs" {
+    STUB_SUMS=bad run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"build.sh: packer-plugin-macosx_${PIN}_mavericks_template.zip does not match the release's SHA256SUMS"* ]] || { echo "$output"; false; }
+    run grep -q '^packer' "$STUB_LOG"
+    [ "$status" -ne 0 ]
+}
+
+@test "a template zip the release's SHA256SUMS does not list is refused" {
+    STUB_SUMS=unlisted run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"build.sh: packer-plugin-macosx_${PIN}_mavericks_template.zip is not in the release's SHA256SUMS"* ]] || { echo "$output"; false; }
+}
+
+@test "SHA256SUMS that cannot be downloaded fail the build, saying which download" {
+    STUB_SUMS=fail run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"build.sh: downloading packer-plugin-macosx_${PIN}_SHA256SUMS failed"* ]] || { echo "$output"; false; }
+}
+
 @test "a failed template download exits 1 saying which download failed" {
     STUB_TEMPLATE_ZIP="$BATS_TEST_TMPDIR/absent.zip" run build "$BATS_TEST_TMPDIR/out"
     [ "$status" -eq 1 ]
@@ -210,4 +238,38 @@ build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
     MVM_IMAGE_KEY=AGE-SECRET-KEY-1BUILDTEST MVM_TOKEN=ghp_buildtoken run build "$BATS_TEST_TMPDIR/out"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     grep -qxF 'packer-secrets build none' "$STUB_LOG" || { cat "$STUB_LOG"; false; }
+}
+
+# spec: Actions run 41501371727 (PR #15) -- the layer build hung for 5 h 18 m, past every timeout packer
+#       has of its own, with QEMU alive, until the job's 6 h limit cancelled the step and kept nothing.
+#       A build has a wall-clock bound below the job's; at it, the build is read while it still runs
+#       (guest-logs.sh: packer's logs, QMP, the live guest), then stopped, and fails.
+@test "a build that outlives its bound is read while it runs, then stopped, and fails saying so" {
+    export MVM_LOG_DIR="$BATS_TEST_TMPDIR/logs"
+    STUB_PACKER_HANG="$BATS_TEST_TMPDIR/packer.pid" MVM_BUILD_TIMEOUT=2 run timeout 60 bash "$REPO/scripts/build.sh" mavericks "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ] || { echo "status $status: $output"; false; }
+    [[ "$output" == *"build.sh: building the guest (mavericks) with packer-plugin-macosx $PIN outlived its bound of 2 s; read it, then stopped it"* ]] \
+        || { echo "$output"; false; }
+    grep -q 'Uploading the stub' "$MVM_LOG_DIR/mavericks/packer-build.log"
+    grep -q 'Started Qemu' "$MVM_LOG_DIR/mavericks/packer-debug.log"
+    [ -f "$MVM_LOG_DIR/mavericks/summary.txt" ]
+    run kill -0 "$(cat "$BATS_TEST_TMPDIR/packer.pid")"
+    [ "$status" -ne 0 ] || { echo "packer still runs"; false; }
+}
+
+@test "a bound that is not a whole number of seconds is refused before anything runs" {
+    MVM_BUILD_TIMEOUT=2h run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"MVM_BUILD_TIMEOUT"* ]] || { echo "$output"; false; }
+    [ ! -s "$STUB_LOG" ] || { cat "$STUB_LOG"; false; }
+}
+
+# spec: the base and the layer are built in one job, under GitHub's 6 h job limit, with time to spare for
+#       the boot and the run: 3 h and 2.5 h, each above its template's own timeouts summed
+@test "the default bounds, 3 h for the base and 2.5 h for the layer, fit together in a 6 h job" {
+    run grep -A1 -E '^  mavericks\)$' "$REPO/scripts/build.sh"
+    [[ "$output" == *"bound=10800"* ]] || { echo "$output"; false; }
+    run grep -A1 -E '^  mavericks-aquatransport\)$' "$REPO/scripts/build.sh"
+    [[ "$output" == *"bound=9000"* ]] || { echo "$output"; false; }
+    (( 10800 + 9000 <= 6 * 3600 - 30 * 60 ))
 }

@@ -14,6 +14,25 @@ while [ $# -gt 0 ]; do
 done
 printf 'curl %s\n' "$url" >> "$STUB_LOG"
 case "$url" in
+  *_SHA256SUMS)
+    # the release's checksums: those of $STUB_TEMPLATE_ZIP under each template zip's name, unless
+    # STUB_SUMS says otherwise: bad (a wrong sum), unlisted (no template zip in it), fail (a 22)
+    [ "${STUB_SUMS:-}" != fail ] || exit 22
+    z="$(sha256sum "$STUB_TEMPLATE_ZIP" | cut -d' ' -f1)"
+    [ "${STUB_SUMS:-}" != bad ] || z="$(printf '%s' bad | sha256sum | cut -d' ' -f1)"
+    pin="${url%/*}"; pin="${pin##*/}"
+    {
+      printf '%s  packer-plugin-macosx_%s_x5.0_linux_amd64.zip\n' "$(printf x | sha256sum | cut -d' ' -f1)" "$pin"
+      if [ "${STUB_SUMS:-}" != unlisted ]; then
+        printf '%s  packer-plugin-macosx_%s_mavericks_template.zip\n' "$z" "$pin"
+        printf '%s  packer-plugin-macosx_%s_mavericks-aquatransport_template.zip\n' "$z" "$pin"
+      fi
+    } > "$out"
+    exit 0 ;;
+  */bin/gate-build-evidence.sh)
+    [ -n "${STUB_READER:-}" ] || exit 22
+    cp "$STUB_READER" "$out" 2>/dev/null || cat "$STUB_READER"
+    exit 0 ;;
   *_mavericks_base_recipe.txt)
     [ -n "${STUB_BASE_RECIPE:-}" ] || exit 22
     printf '%s\n' "$STUB_BASE_RECIPE"

@@ -66,7 +66,7 @@ fi
 # spec: tests/main.bats -- an artifact is readable by anyone who can read the repo, and GitHub
 #       masks a secret only in the job's log, so a kept file holding the image key or the token
 #       is dropped before the dir is named
-# shellcheck disable=SC2317  # keep_logs runs from finish, the EXIT trap's
+# shellcheck disable=SC2317,SC2329  # keep_logs runs from finish, the EXIT trap's
 keep_logs() {
   local f s
   if [ -f "$data/serial.log" ]; then mkdir -p "$MVM_LOG_DIR" && cp "$data/serial.log" "$MVM_LOG_DIR/boot-serial.log"; fi
@@ -81,7 +81,7 @@ keep_logs() {
   echo "mavericks-vm: this run's logs are kept in $MVM_LOG_DIR (the step's logs-dir output)"
 }
 
-# shellcheck disable=SC2317  # finish runs from the EXIT trap below
+# shellcheck disable=SC2317,SC2329  # finish runs from the EXIT trap below
 finish() {
   status=$1
   if [ "$status" -ne 0 ] && [ "${MVM_DEBUG_ON_ERROR:-false}" = true ]; then

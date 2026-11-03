@@ -54,6 +54,20 @@ jobs:
           name: mavericks-vm-logs-warm-${{ github.run_attempt }}
           path: ${{ steps.vm.outputs.logs-dir }}
           retention-days: 30
+      # spec: tests/self_test_workflow.bats -- a cancelled job (Actions run 41501371727, at the 6 h limit) has its
+      #       processes killed, so the Action keeps nothing; packer's logs and the serial console are still on the
+      #       data disk, and only they are kept
+      - name: Keep packer's logs of a cancelled build
+        if: cancelled() && env.MVM_DATA_DIR != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: mavericks-vm-logs-warm-cancelled-${{ github.run_attempt }}
+          path: |
+            ${{ env.MVM_DATA_DIR }}/build/packer-build.log
+            ${{ env.MVM_DATA_DIR }}/build/packer-debug.log
+            ${{ env.MVM_DATA_DIR }}/build/templates/*/output-*-install.log
+          if-no-files-found: ignore
+          retention-days: 30
       - name: The data disk's peak use
         if: always()
         run: |
@@ -137,6 +151,20 @@ jobs:
         with:
           name: mavericks-vm-logs-guest-${{ strategy.job-index }}-${{ github.run_attempt }}
           path: ${{ steps.vm.outputs.logs-dir }}
+          retention-days: 30
+      # spec: tests/self_test_workflow.bats -- a cancelled job (Actions run 41501371727, at the 6 h limit) has its
+      #       processes killed, so the Action keeps nothing; packer's logs and the serial console are still on the
+      #       data disk, and only they are kept
+      - name: Keep packer's logs of a cancelled build
+        if: cancelled() && env.MVM_DATA_DIR != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: mavericks-vm-logs-guest-${{ strategy.job-index }}-cancelled-${{ github.run_attempt }}
+          path: |
+            ${{ env.MVM_DATA_DIR }}/build/packer-build.log
+            ${{ env.MVM_DATA_DIR }}/build/packer-debug.log
+            ${{ env.MVM_DATA_DIR }}/build/templates/*/output-*-install.log
+          if-no-files-found: ignore
           retention-days: 30
       - name: The data disk's peak use
         if: always()

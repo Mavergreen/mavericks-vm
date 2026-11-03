@@ -189,7 +189,7 @@ fi
 
 # spec: tests/guest_logs.bats -- read-only all the way: qemu-nbd --read-only, mount -o ro
 dev="" mnt="$(mktemp -d "${TMPDIR:-/tmp}/mavericks-vm-guest.XXXXXX")"
-# shellcheck disable=SC2317  # cleanup runs from the EXIT trap below
+# shellcheck disable=SC2317,SC2329  # cleanup runs from the EXIT trap below
 cleanup() {
   sudo umount "$mnt" 2>/dev/null
   [ -z "$dev" ] || sudo qemu-nbd --disconnect "$dev" > /dev/null 2>&1

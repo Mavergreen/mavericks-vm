@@ -103,6 +103,12 @@ checked against the release's `SHA256SUMS` before it is unpacked; `summary.txt` 
 release when its template has no socket or no reader), the host's view of the QEMU's threads and I/O,
 and a few more bounded `ssh -vvv` sessions to tell which part of a session fails. The AHCI registers,
 the interrupt state and a screenshot are text and PNG.
+A build that hangs past its own timeouts is read the same way at its bound, 3 hours for the base
+guest and 2.5 hours for the Aqua Transport layer, then stopped, and the step fails: together they
+fit in GitHub's 6-hour job limit, and a job that limit cancels keeps nothing, since its processes
+are killed. Give the job at least that long. A cancelled job's packer logs and serial console
+are left on the data disk (`build/` under the `MVM_DATA_DIR` the Action sets): this repository's
+own self-test uploads just those on cancellation.
 Never an image: nothing of Apple's OS but those logs. A file holding `image-key` or `token`
 is dropped. To keep them, upload the directory:
 

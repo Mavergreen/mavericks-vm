@@ -239,3 +239,37 @@ build_layer() { bash "$REPO/scripts/build.sh" mavericks-aquatransport "$@"; }
     [ "$status" -eq 0 ] || { echo "$output"; false; }
     grep -qxF 'packer-secrets build none' "$STUB_LOG" || { cat "$STUB_LOG"; false; }
 }
+
+# spec: Actions run 41501371727 (PR #15) -- the layer build hung for 5 h 18 m, past every timeout packer
+#       has of its own, with QEMU alive, until the job's 6 h limit cancelled the step and kept nothing.
+#       A build has a wall-clock bound below the job's; at it, the build is read while it still runs
+#       (guest-logs.sh: packer's logs, QMP, the live guest), then stopped, and fails.
+@test "a build that outlives its bound is read while it runs, then stopped, and fails saying so" {
+    export MVM_LOG_DIR="$BATS_TEST_TMPDIR/logs"
+    STUB_PACKER_HANG="$BATS_TEST_TMPDIR/packer.pid" MVM_BUILD_TIMEOUT=2 run timeout 60 bash "$REPO/scripts/build.sh" mavericks "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 1 ] || { echo "status $status: $output"; false; }
+    [[ "$output" == *"build.sh: building the guest (mavericks) with packer-plugin-macosx $PIN outlived its bound of 2 s; read it, then stopped it"* ]] \
+        || { echo "$output"; false; }
+    grep -q 'Uploading the stub' "$MVM_LOG_DIR/mavericks/packer-build.log"
+    grep -q 'Started Qemu' "$MVM_LOG_DIR/mavericks/packer-debug.log"
+    [ -f "$MVM_LOG_DIR/mavericks/summary.txt" ]
+    run kill -0 "$(cat "$BATS_TEST_TMPDIR/packer.pid")"
+    [ "$status" -ne 0 ] || { echo "packer still runs"; false; }
+}
+
+@test "a bound that is not a whole number of seconds is refused before anything runs" {
+    MVM_BUILD_TIMEOUT=2h run build "$BATS_TEST_TMPDIR/out"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"MVM_BUILD_TIMEOUT"* ]] || { echo "$output"; false; }
+    [ ! -s "$STUB_LOG" ] || { cat "$STUB_LOG"; false; }
+}
+
+# spec: the base and the layer are built in one job, under GitHub's 6 h job limit, with time to spare for
+#       the boot and the run: 3 h and 2.5 h, each above its template's own timeouts summed
+@test "the default bounds, 3 h for the base and 2.5 h for the layer, fit together in a 6 h job" {
+    run grep -A1 -E '^  mavericks\)$' "$REPO/scripts/build.sh"
+    [[ "$output" == *"bound=10800"* ]] || { echo "$output"; false; }
+    run grep -A1 -E '^  mavericks-aquatransport\)$' "$REPO/scripts/build.sh"
+    [[ "$output" == *"bound=9000"* ]] || { echo "$output"; false; }
+    (( 10800 + 9000 <= 6 * 3600 - 30 * 60 ))
+}

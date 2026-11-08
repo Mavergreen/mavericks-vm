@@ -125,8 +125,10 @@ EOF
 @test "copyback and the booleans take true or false" {
     MVM_IN_COPYBACK=maybe run inputs
     [ "$status" -ne 0 ]
+    [[ "$output" == *"::error title=mavericks-vm::copyback: want true or false (got 'maybe')"* ]] || { echo "$output"; false; }
     MVM_IN_DISABLE_CACHE=yes run inputs
     [ "$status" -ne 0 ]
+    [[ "$output" == *"disable-cache: want true or false"* ]] || { echo "$output"; false; }
 }
 
 # GitHub's runners are AMD or Intel by chance, and on AMD 10.9 hangs unless the guest's CPU
@@ -240,3 +242,4 @@ EOF
     MVM_IN_CACHE_STORE=repo run inputs
     env_has MVM_BLOB_DIR=/mnt/mavericks-vm/blob
 }
+

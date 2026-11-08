@@ -313,3 +313,37 @@ sys.exit(1 if bad else 0)
 PY
     [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
+
+# spec: tests/aqua.bats -- aqua-session is proven on a real guest: without the helper a command is
+#       outside any login (Background), through it the session is Aqua, and an app opened there
+#       starts; one row asks for the session, so the others prove the default has none
+@test "the self-test proves aqua-session on one row: Background over ssh, Aqua through the helper, an app starts" {
+    REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+    run python3 - "$REPO/.github/workflows/self-test.yml" <<'PY'
+import sys, yaml
+guest = yaml.safe_load(open(sys.argv[1]))["jobs"]["guest"]
+rows = guest["strategy"]["matrix"]["include"]
+bad = []
+asking = [r for r in rows if r.get("aqua-session") is True]
+if len(asking) != 1:
+    bad.append("want exactly one row with aqua-session: true, got %d" % len(asking))
+use = [s for s in guest["steps"] if s.get("uses") == "./"][0]["with"]
+if use.get("aqua-session") != "${{ matrix.aqua-session && 'true' || 'false' }}":
+    bad.append("the Action's aqua-session is not the row's: %r" % use.get("aqua-session"))
+steps = [s for s in guest["steps"] if s.get("name") == "The desktop session"]
+if not steps:
+    bad.append("no 'The desktop session' step")
+else:
+    s = steps[0]
+    if s.get("if") != "matrix.aqua-session" or s.get("shell") != "mavericks {0}":
+        bad.append("the desktop session step must run in the guest, on the asking row only")
+    for want in ('test "$(launchctl managername)" = Background',
+                 'test "$(/usr/local/bin/guest-macosx-aqua launchctl managername)" = Aqua',
+                 "/usr/local/bin/guest-macosx-aqua open -a TextEdit", "TextEdit did not start"):
+        if want not in s.get("run", ""):
+            bad.append("the desktop session step lacks %r" % want)
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+PY
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+}

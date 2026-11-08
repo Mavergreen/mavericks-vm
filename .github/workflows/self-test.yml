@@ -89,7 +89,8 @@ jobs:
           # spec: tests/self_test_workflow.bats -- each instruction-set level, proven by what 10.9
           #       reports (has) and by what runs (has) and faults (faults); under KVM a level
           #       guarantees no more than that, so BMI on none and everything on avx go unchecked
-          - { sync: rsync, cpu-isa: none, brand: Penryn, has: '', faults: 'avx avx2 fma' }
+          # spec: tests/self_test_workflow.bats -- this row also asks for the desktop session
+          - { sync: rsync, cpu-isa: none, brand: Penryn, has: '', faults: 'avx avx2 fma', aqua-session: true }
           # spec: tests/inputs.bats -- Nehalem names no vendor, so the Action adds GenuineIntel's
           - { sync: scp, cpu-model: Nehalem, brand: Nehalem, has: '', faults: 'avx avx2 fma' }
           - { sync: tar, cpu-isa: avx, brand: Sandy Bridge, has: avx, faults: '' }
@@ -117,6 +118,7 @@ jobs:
           cpu-isa: ${{ matrix.cpu-isa || '' }}
           cpu-model: ${{ matrix.cpu-model || '' }}
           cache-store: ${{ matrix.cache-store || 'auto' }}
+          aqua-session: ${{ matrix.aqua-session && 'true' || 'false' }}
           debug-on-error: true
           envs: 'ROUNDTRIP'
           run: |
@@ -180,3 +182,16 @@ jobs:
       - name: Later steps reach the guest
         shell: mavericks {0}
         run: test "$(sw_vers -productVersion)" = 10.9.5
+      # spec: tests/self_test_workflow.bats -- aqua-session, proven where it runs: a command over
+      #       ssh is outside any login, one through the helper is in Aqua, and an app opened there starts
+      - name: The desktop session
+        if: matrix.aqua-session
+        shell: mavericks {0}
+        run: |
+          test "$(launchctl managername)" = Background
+          test "$(/usr/local/bin/guest-macosx-aqua launchctl managername)" = Aqua
+          /usr/local/bin/guest-macosx-aqua open -a TextEdit
+          i=0
+          until ps -axo user=,comm= | grep -q "^$(id -un) .*/TextEdit$"; do
+            i=$((i + 1)); [ "$i" -lt 30 ] || { echo "TextEdit did not start within 30s"; exit 1; }; sleep 1
+          done

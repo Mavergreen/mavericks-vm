@@ -74,6 +74,9 @@ inputs:
   cpu-model:
     description: The guest CPU model, as QEMU's -cpu, instead of cpu-isa; one that names no vendor gets vendor=GenuineIntel, which 10.9 needs on an AMD runner
     default: ''
+  aqua-session:
+    description: Log the guest in to a desktop before run, for tests that need an Aqua session -- the account gets a random password that only the guest holds, and auto-login; run a command in the session with /usr/local/bin/guest-macosx-aqua <command>
+    default: 'false'
   cache-store:
     description: Where the encrypted guest is cached -- auto (shared for Mavergreen repos, else repo), shared (Mavergreen's private registry) or repo (this repo's own actions/cache)
     default: auto
@@ -115,6 +118,7 @@ runs:
         MVM_IN_SYNC_TIME: ${{ inputs.sync-time }}
         MVM_IN_DEBUG_ON_ERROR: ${{ inputs.debug-on-error }}
         MVM_IN_CACHE_STORE: ${{ inputs.cache-store }}
+        MVM_IN_AQUA_SESSION: ${{ inputs.aqua-session }}
       run: bash "$GITHUB_ACTION_PATH/scripts/inputs.sh"
 
     - name: Make the data and cache directories

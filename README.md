@@ -79,7 +79,7 @@ As with vmactions:
 | `vnc-password` | | Accepted and ignored: there is no screen |
 | `token` | `${{ github.token }}` | Pulls and pushes Mavergreen's shared cache; needs `packages: write` |
 
-Plus four more:
+Plus five more:
 
 | Input | | |
 |---|---|---|
@@ -87,6 +87,7 @@ Plus four more:
 | `cpu-isa` | `none` | The guest CPU by the instructions it has: `none` (no AVX), `avx` (Sandy Bridge: AVX, not AVX2, FMA or BMI) or `avx2` (AVX2, FMA, BMI1 and BMI2 too). Under KVM a level is what the guest is *told*: the instructions above it still run on the runner's CPU, except that `none` makes the AVX family fault. `avx` and `avx2` make QEMU refuse a runner that lacks one of their instructions; `none`, the default line unchanged, does not. Not with `cpu-model` |
 | `cpu-model` | | The guest CPU, as QEMU's `-cpu`, instead of `cpu-isa`. Without a `vendor=`, it gets `vendor=GenuineIntel`: on GitHub's AMD runners, 10.9 hangs without it |
 | `cache-store` | `auto` | `repo` (your repo's own cache), `shared` (Mavergreen's), or `auto` |
+| `aqua-session` | `false` | Log the guest in to a desktop before `run`, for tests that need an Aqua session (see below) |
 
 After the step, `ssh mavericks` reaches the guest from later steps.
 
@@ -135,6 +136,35 @@ Once the download has moved past the pinned version,
 building the guest anew fails, naming both checksums (pinned and served),
 until a plugin release pins the new one.
 An already cached guest keeps working.
+
+## A desktop session
+
+Over `ssh`, a command runs outside any login: `launchctl managername` says `Background`,
+and Launch Services won't start apps while nobody is logged in.
+With `aqua-session: true`, the guest is logged in to a desktop before `run`:
+
+```yaml
+- uses: Mavergreen/mavericks-vm@v1
+  with:
+    image-key: ${{ secrets.MAVERICKS_VM_KEY }}
+    aqua-session: true
+    run: /usr/local/bin/guest-macosx-aqua ./tests/needs-a-session.sh
+```
+
+`/usr/local/bin/guest-macosx-aqua <command>` runs the command in that session, as the `ssh` user,
+in the current directory, with the environment `sudo -E` passes (it still resets `USER`, `LOGNAME`
+and its own `SUDO_*`); `--check` prints the session's state. Name it by its path: 10.9 gives an
+`ssh` command a `PATH` without `/usr/local/bin`.
+
+On 10.9, loginwindow logs in by itself only at boot, and only with the account's password in
+`/etc/kcpassword`. So the step gives the account a random password that the guest generates
+and never prints, writes it there, turns on auto-login, marks Setup Assistant's first-login
+screens seen, restarts the guest (about a minute), and waits until the session is Aqua with
+Dock and Finder running. The restart keeps what `prepare` wrote to disk, but not what it left
+running or mounted. The password never leaves the guest (it is in `dscl`'s arguments inside the
+guest for the moment it is set). The step runs after `prepare` and any `cache-after-prepare`
+snapshot, so no cached image holds it. Without the input, the guest has no password and no
+auto-login.
 
 ## What it can't do
 

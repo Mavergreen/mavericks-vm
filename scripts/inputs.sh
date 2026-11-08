@@ -34,6 +34,7 @@ after_prepare="${MVM_IN_CACHE_AFTER_PREPARE:-false}"; boolean cache-after-prepar
 debug="${MVM_IN_DEBUG:-false}"; boolean debug "$debug"
 sync_time="${MVM_IN_SYNC_TIME:-false}"; boolean sync-time "$sync_time"
 debug_on_error="${MVM_IN_DEBUG_ON_ERROR:-false}"; boolean debug-on-error "$debug_on_error"
+aqua_session="${MVM_IN_AQUA_SESSION:-false}"; boolean aqua-session "$aqua_session"
 
 sync="${MVM_IN_SYNC:-rsync}"
 case "$sync" in
@@ -125,6 +126,7 @@ case "$cache_dir" in /*) ;; *) die "cache-dir: want an absolute path (got '$cach
   echo "MVM_DEBUG=$debug"
   echo "MVM_SYNC_TIME=$sync_time"
   echo "MVM_DEBUG_ON_ERROR=$debug_on_error"
+  echo "MVM_AQUA_SESSION=$aqua_session"
   echo "MVM_STORE=$store"
   echo "MVM_BLOB_DIR=$data_dir/blob"
 } >> "$GITHUB_ENV"

@@ -66,7 +66,7 @@ esac
 exit 0
 STUB
     chmod +x "$S/stub"
-    for f in key.sh image.sh build.sh layer.sh boot.sh sync.sh run.sh shell-wrapper.sh space.sh snapshot.sh; do
+    for f in key.sh image.sh build.sh layer.sh boot.sh sync.sh run.sh shell-wrapper.sh space.sh snapshot.sh aqua.sh; do
         cp "$S/stub" "$S/$f"
     done
     export PATH="$REPO/tests/stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
@@ -737,4 +737,27 @@ B
     [ "$status" -ne 0 ]
     grep -q 'the guest panicked' "$RUNNER_TEMP/mavericks-vm-logs/boot-serial.log"
     grep -qxF "logs-dir=$RUNNER_TEMP/mavericks-vm-logs" "$GITHUB_OUTPUT"
+}
+
+# spec: tests/aqua.bats -- aqua-session gives the guest's account a password and auto-login, so it
+#       starts after every snapshot (no cached image holds either) and before run, which needs it;
+#       without the input there is no session
+@test "aqua-session: the session starts after prepare and its snapshot, before run; without it, never" {
+    run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    ! grep -q '^aqua.sh' "$CALLS" || false
+    : > "$CALLS"
+    MVM_AQUA_SESSION=true run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(order)" = "${HIT/run.sh run.sh/run.sh aqua.sh run.sh}" ] || { order; false; }
+    drop prepared; : > "$CALLS"
+    MVM_AQUA_SESSION=true MVM_CACHE_AFTER_PREPARE=true run main
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [ "$(order)" = "${PREPARE_AGAIN/sync.sh in run.sh sync.sh out/sync.sh in aqua.sh run.sh sync.sh out}" ] || { order; false; }
+}
+
+@test "aqua-session: a session that fails to start fails the step before run" {
+    MVM_AQUA_SESSION=true STUB_FAIL='aqua.sh*' run main
+    [ "$status" -eq 1 ]
+    ! grep -q '^run.sh .*' <(sed -n '/^aqua.sh/,$p' "$CALLS") || false
 }

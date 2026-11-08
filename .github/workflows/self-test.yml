@@ -89,8 +89,10 @@ jobs:
           # spec: tests/self_test_workflow.bats -- each instruction-set level, proven by what 10.9
           #       reports (has) and by what runs (has) and faults (faults); under KVM a level
           #       guarantees no more than that, so BMI on none and everything on avx go unchecked
-          # spec: tests/self_test_workflow.bats -- this row also asks for the desktop session
-          - { sync: rsync, cpu-isa: none, brand: Penryn, has: '', faults: 'avx avx2 fma', aqua-session: true }
+          # spec: tests/self_test_workflow.bats -- this row also asks for the desktop session; it is
+          #       picked by its cpu-isa, since a new key would rename the job, and main requires each
+          #       guest job by its name
+          - { sync: rsync, cpu-isa: none, brand: Penryn, has: '', faults: 'avx avx2 fma' }
           # spec: tests/inputs.bats -- Nehalem names no vendor, so the Action adds GenuineIntel's
           - { sync: scp, cpu-model: Nehalem, brand: Nehalem, has: '', faults: 'avx avx2 fma' }
           - { sync: tar, cpu-isa: avx, brand: Sandy Bridge, has: avx, faults: '' }
@@ -118,7 +120,7 @@ jobs:
           cpu-isa: ${{ matrix.cpu-isa || '' }}
           cpu-model: ${{ matrix.cpu-model || '' }}
           cache-store: ${{ matrix.cache-store || 'auto' }}
-          aqua-session: ${{ matrix.aqua-session && 'true' || 'false' }}
+          aqua-session: ${{ matrix.cpu-isa == 'none' && 'true' || 'false' }}
           debug-on-error: true
           envs: 'ROUNDTRIP'
           run: |
@@ -185,7 +187,7 @@ jobs:
       # spec: tests/self_test_workflow.bats -- aqua-session, proven where it runs: a command over
       #       ssh is outside any login, one through the helper is in Aqua, and an app opened there starts
       - name: The desktop session
-        if: matrix.aqua-session
+        if: matrix.cpu-isa == 'none'
         shell: mavericks {0}
         run: |
           test "$(launchctl managername)" = Background

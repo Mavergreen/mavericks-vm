@@ -324,18 +324,21 @@ import sys, yaml
 guest = yaml.safe_load(open(sys.argv[1]))["jobs"]["guest"]
 rows = guest["strategy"]["matrix"]["include"]
 bad = []
-asking = [r for r in rows if r.get("aqua-session") is True]
+# the row is picked by a value it already has: a new matrix key would rename a required job
+asking = [r for r in rows if r.get("cpu-isa") == "none"]
 if len(asking) != 1:
-    bad.append("want exactly one row with aqua-session: true, got %d" % len(asking))
+    bad.append("want exactly one row with cpu-isa: none, got %d" % len(asking))
+if any("aqua-session" in r for r in rows):
+    bad.append("a row has an aqua-session key, which renames its required job")
 use = [s for s in guest["steps"] if s.get("uses") == "./"][0]["with"]
-if use.get("aqua-session") != "${{ matrix.aqua-session && 'true' || 'false' }}":
+if use.get("aqua-session") != "${{ matrix.cpu-isa == 'none' && 'true' || 'false' }}":
     bad.append("the Action's aqua-session is not the row's: %r" % use.get("aqua-session"))
 steps = [s for s in guest["steps"] if s.get("name") == "The desktop session"]
 if not steps:
     bad.append("no 'The desktop session' step")
 else:
     s = steps[0]
-    if s.get("if") != "matrix.aqua-session" or s.get("shell") != "mavericks {0}":
+    if s.get("if") != "matrix.cpu-isa == 'none'" or s.get("shell") != "mavericks {0}":
         bad.append("the desktop session step must run in the guest, on the asking row only")
     for want in ('test "$(launchctl managername)" = Background',
                  'test "$(/usr/local/bin/guest-macosx-aqua launchctl managername)" = Aqua',

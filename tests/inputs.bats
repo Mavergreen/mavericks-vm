@@ -16,7 +16,7 @@ setup() {
         MVM_IN_SYNC=rsync MVM_IN_COPYBACK=true MVM_IN_USESH= MVM_IN_ENVS= MVM_IN_NAT= \
         MVM_IN_HAS_IMAGE_KEY=true MVM_IN_DISABLE_CACHE=false MVM_IN_CACHE_AFTER_PREPARE=false \
         MVM_IN_CACHE_AFTER_PREPARE_KEY_SUFFIX= MVM_IN_CUSTOM_SHELL_NAME=mavericks \
-        MVM_IN_DATA_DIR= MVM_IN_CACHE_DIR= MVM_IN_DEBUG= MVM_IN_SYNC_TIME= MVM_IN_DEBUG_ON_ERROR= \
+        MVM_IN_DATA_DIR= MVM_IN_CACHE_DIR= MVM_IN_DEBUG= MVM_IN_SYNC_TIME= MVM_IN_DEBUG_ON_ERROR= MVM_IN_AQUA_SESSION= \
         MVM_IN_CACHE_STORE=auto GITHUB_REPOSITORY_OWNER=Mavergreen
 }
 
@@ -34,6 +34,7 @@ want = {
     "cache-after-prepare-key-suffix": "", "debug-on-error": "", "vnc-password": "",
     "custom-shell-name": "mavericks", "token": "${{ github.token }}",
     "image-key": None, "cpu-model": "", "cpu-isa": "", "cache-store": "auto",
+    "aqua-session": "false",
 }
 got = yaml.safe_load(open(sys.argv[1]))["inputs"]
 bad = [f"{k}: want default {v!r}, got {got.get(k, {}).get('default')!r}" if k in got else f"{k}: missing"
@@ -125,8 +126,10 @@ EOF
 @test "copyback and the booleans take true or false" {
     MVM_IN_COPYBACK=maybe run inputs
     [ "$status" -ne 0 ]
+    [[ "$output" == *"::error title=mavericks-vm::copyback: want true or false (got 'maybe')"* ]] || { echo "$output"; false; }
     MVM_IN_DISABLE_CACHE=yes run inputs
     [ "$status" -ne 0 ]
+    [[ "$output" == *"disable-cache: want true or false"* ]] || { echo "$output"; false; }
 }
 
 # GitHub's runners are AMD or Intel by chance, and on AMD 10.9 hangs unless the guest's CPU
@@ -239,4 +242,16 @@ EOF
 @test "the repo cache's encrypted image lives in data-dir" {
     MVM_IN_CACHE_STORE=repo run inputs
     env_has MVM_BLOB_DIR=/mnt/mavericks-vm/blob
+}
+
+@test "aqua-session is off by default, true or false, and anything else is refused" {
+    run inputs
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    env_has MVM_AQUA_SESSION=false
+    : > "$GITHUB_ENV"
+    MVM_IN_AQUA_SESSION=true run inputs
+    env_has MVM_AQUA_SESSION=true
+    : > "$GITHUB_ENV"
+    MVM_IN_AQUA_SESSION=yes run inputs
+    [ "$status" -ne 0 ]; [[ "$output" == *"aqua-session"* ]] || false
 }

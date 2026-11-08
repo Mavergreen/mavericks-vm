@@ -23,16 +23,18 @@ posint() {  # $1 = input name, $2 = value
 posint mem "${MVM_IN_MEM:-}"
 posint cpu "${MVM_IN_CPU:-}"
 
-bool() {  # $1 = input name, $2 = value, $3 = default when empty
-  v="${2:-$3}"
-  case "$v" in true|false) printf '%s' "$v" ;; *) die "$1: want true or false (got '$2')" ;; esac
+# spec: tests/inputs.bats -- checked here, not inside $(...): there die's ::error went into the
+#       variable, and a bad value failed the step with nothing said
+boolean() {  # $1 = input name, $2 = its value, with its default for empty
+  case "$2" in true|false) ;; *) die "$1: want true or false (got '$2')" ;; esac
 }
-copyback="$(bool copyback "${MVM_IN_COPYBACK:-}" true)"
-disable_cache="$(bool disable-cache "${MVM_IN_DISABLE_CACHE:-}" false)"
-after_prepare="$(bool cache-after-prepare "${MVM_IN_CACHE_AFTER_PREPARE:-}" false)"
-debug="$(bool debug "${MVM_IN_DEBUG:-}" false)"
-sync_time="$(bool sync-time "${MVM_IN_SYNC_TIME:-}" false)"
-debug_on_error="$(bool debug-on-error "${MVM_IN_DEBUG_ON_ERROR:-}" false)"
+copyback="${MVM_IN_COPYBACK:-true}"; boolean copyback "$copyback"
+disable_cache="${MVM_IN_DISABLE_CACHE:-false}"; boolean disable-cache "$disable_cache"
+after_prepare="${MVM_IN_CACHE_AFTER_PREPARE:-false}"; boolean cache-after-prepare "$after_prepare"
+debug="${MVM_IN_DEBUG:-false}"; boolean debug "$debug"
+sync_time="${MVM_IN_SYNC_TIME:-false}"; boolean sync-time "$sync_time"
+debug_on_error="${MVM_IN_DEBUG_ON_ERROR:-false}"; boolean debug-on-error "$debug_on_error"
+aqua_session="${MVM_IN_AQUA_SESSION:-false}"; boolean aqua-session "$aqua_session"
 
 sync="${MVM_IN_SYNC:-rsync}"
 case "$sync" in
@@ -124,6 +126,7 @@ case "$cache_dir" in /*) ;; *) die "cache-dir: want an absolute path (got '$cach
   echo "MVM_DEBUG=$debug"
   echo "MVM_SYNC_TIME=$sync_time"
   echo "MVM_DEBUG_ON_ERROR=$debug_on_error"
+  echo "MVM_AQUA_SESSION=$aqua_session"
   echo "MVM_STORE=$store"
   echo "MVM_BLOB_DIR=$data_dir/blob"
 } >> "$GITHUB_ENV"

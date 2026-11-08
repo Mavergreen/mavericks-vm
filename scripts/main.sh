@@ -255,6 +255,12 @@ if [ -n "${MVM_PREPARE:-}" ] && [ "$prepared_hit" = false ]; then
   fi
 fi
 
+# spec: tests/main.bats "aqua-session" -- after every snapshot, so no cached image holds the
+#       account's password or auto-login, and before run, which needs the session
+if [ "${MVM_AQUA_SESSION:-false}" = true ]; then
+  step aqua.sh || exit 1
+fi
+
 status=0
 if [ -n "${MVM_RUN:-}" ]; then
   step run.sh "$(scriptfile "$MVM_RUN")"; status=$?

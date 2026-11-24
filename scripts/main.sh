@@ -63,6 +63,13 @@ if ! printf '%s\n' "${MVM_IMAGE_KEY:-}" | age-keygen -y > /dev/null 2>&1; then
   exit 1
 fi
 
+# spec: tests/subshell_check.bats -- a failure the guest's sh -e would let pass is refused here,
+#       before anything is pulled, built or booted
+unchecked=0
+if [ -n "${MVM_PREPARE:-}" ]; then printf '%s\n' "$MVM_PREPARE" | step subshell-check.sh prepare || unchecked=1; fi
+if [ -n "${MVM_RUN:-}" ]; then printf '%s\n' "$MVM_RUN" | step subshell-check.sh run || unchecked=1; fi
+[ "$unchecked" = 0 ] || exit 1
+
 # spec: tests/main.bats -- an artifact is readable by anyone who can read the repo, and GitHub
 #       masks a secret only in the job's log, so a kept file holding the image key or the token
 #       is dropped before the dir is named

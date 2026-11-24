@@ -58,7 +58,7 @@ As with vmactions:
 | `osname` | `mavericks` | Only `mavericks` |
 | `release` | `10.9` | Only `10.9` |
 | `arch` | `x86_64` | Only `x86_64` |
-| `run` | | Commands run in the guest, with `sh -e` |
+| `run` | | Commands run in the guest, with `sh -e` (see [The guest's shell](#the-guests-shell)) |
 | `prepare` | | Commands run before `run` |
 | `envs` | | Names of environment variables to pass in, space-separated |
 | `sync` | `rsync` | How the workspace gets in and back: `rsync`, `scp`, `tar` or `no` |
@@ -90,6 +90,35 @@ Plus five more:
 | `aqua-session` | `false` | Log the guest in to a desktop before `run`, for tests that need an Aqua session (see below) |
 
 After the step, `ssh mavericks` reaches the guest from later steps.
+
+## The guest's shell
+
+`prepare` and `run` run with `sh -e`, and the guest's `/bin/sh` is Apple's bash 3.2.53. Under
+`-e` it does **not** stop when one of these fails and nothing checks its status:
+
+- a `( … )` subshell: at the top level, redirected, as the last item of an `&&` list or of a
+  pipeline, or inside an `if`, `for` or `case` body, a `{ }` group or a function (unless it is
+  the function's last command);
+- a `[[ … ]]` test or a `(( … ))` command.
+
+An `ERR` trap misses them too. Every bash from 4.0 on stops, as does macOS's own bash 3.2.57, so
+only the guest shows it, and the step passes with a failing test. `{ false; }`, `a && false`,
+`x=$(false)` and plain commands do stop.
+
+So the Action reads `prepare` and `run` (and a `shell: mavericks {0}` step's script) on the
+runner first, and refuses any of these that nothing checks, naming the line, before it boots
+the guest. Check its status:
+
+```sh
+( cd gate && sh run-tests.sh ) || exit 1
+rc=0; ( cd gate && sh run-tests.sh ) || rc=$?
+if ( cd gate && sh probe.sh ); then …; fi
+[[ $got = "$want" ]] || exit 1
+```
+
+Any `||`, an `if`, `while` or `until` condition, `!`, or the left side of `&&` or `|` counts as
+a check. A script the step starts with `sh x.sh` runs under the same bash 3.2.53, with `-e` only
+if it sets it, and is not read: the same rule holds there.
 
 ## When it fails
 

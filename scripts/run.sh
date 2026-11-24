@@ -12,6 +12,9 @@ ws="${GITHUB_WORKSPACE:?run.sh: GITHUB_WORKSPACE is unset}"
 # spec: tests/run.bats -- the script goes to a file in the guest first and runs from there with
 #       nothing on stdin: piped into the guest's sh, a command in it that read stdin swallowed the
 #       rest of the script and the step passed (10.9's sh is bash, which reads a pipe byte by byte)
+# spec: tests/subshell_check.bats -- a custom-shell step's script is checked here, as main.sh checks
+#       prepare and run before the boot
+bash "$(dirname "$0")/subshell-check.sh" step < "$1" || exit 1
 cfg="$HOME/.ssh/config"
 f="$(ssh -F "$cfg" -n mavericks 'mktemp /tmp/mavericks-vm-run.XXXXXX')" || exit 1
 {

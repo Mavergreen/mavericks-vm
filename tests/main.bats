@@ -7,7 +7,7 @@
 setup() {
     REPO="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
     S="$BATS_TEST_TMPDIR/scripts"; mkdir -p "$S"
-    cp "$REPO/scripts/main.sh" "$S/"
+    cp "$REPO/scripts/main.sh" "$REPO/scripts/subshell-check.sh" "$S/"
     export CALLS="$BATS_TEST_TMPDIR/calls" ROOM="$BATS_TEST_TMPDIR/room" STORE="$BATS_TEST_TMPDIR/store"
     : > "$CALLS"; : > "$ROOM"
     cat > "$S/stub" <<'STUB'

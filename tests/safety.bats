@@ -8,7 +8,7 @@ setup() {
     export PATH="$REPO/tests/stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/stub.log" STUB_SSH_UP=1
     : > "$STUB_LOG"
     export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME/.ssh"; : > "$HOME/.ssh/config"
-    S="$BATS_TEST_TMPDIR/scripts"; mkdir -p "$S"; cp "$REPO/scripts/main.sh" "$S/"
+    S="$BATS_TEST_TMPDIR/scripts"; mkdir -p "$S"; cp "$REPO/scripts/main.sh" "$REPO/scripts/subshell-check.sh" "$S/"
     export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
     for f in key.sh image.sh build.sh layer.sh boot.sh sync.sh run.sh shell-wrapper.sh space.sh snapshot.sh; do
         cat > "$S/$f" <<STUB
